@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>실시간 텍스트 협업</title>
+  <style>
+    /* ... (기존 스타일 동일) ... */
+  </style>
+</head>
+<body>
+  <h1>실시간 텍스트 협업 예제</h1>
+  <div>
+    <button id="createText">텍스트 상자 만들기</button>
+  </div>
+  <div id="canvas"></div>
+  <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+<script>
+const socket = io('http://localhost:3000');
+const canvas = document.getElementById('canvas');
+const createTextBtn = document.getElementById('createText');
+const textBoxElements = {};
+
+// 팀/유저 정보 입력
+const uId = prompt('유저ID를 입력하세요', 'user1');
+const tId = prompt('팀ID를 입력하세요', '1');
+socket.emit('joinTeam', { uId, tId });
+
+// 초기 데이터 수신
+socket.on('initialize', (boxes) => {
+  boxes.forEach(addTextBoxElement);
+});
+
+// 새 텍스트 박스 추가
+socket.on('addTextBox', addTextBoxElement);
+
+// 텍스트 박스 업데이트
+socket.on('updateTextBox', updateTextBoxElement);
+
+// 텍스트 박스 이동/크기조절
+socket.on('moveTextBox', (data) => {
+  const { node, cLocate, cScale } = data;
+  const el = textBoxElements[node];
+  if (!el) return;
+  if (cLocate) {
+    el.style.left = cLocate.x + 'px';
+    el.style.top = cLocate.y + 'px';
+  }
+  if (cScale) {
+    el.style.width = cScale.width + 'px';
+    el.style.height = cScale.height + 'px';
+  }
+});
+
+// 텍스트 박스 삭제
+socket.on('removeTextBox', (data) => {
+  const node = typeof data === 'object' ? data.node : data;
+  if (textBoxElements[node]) {
+    textBoxElements[node].remove();
+    delete textBoxElements[node];
+  }
+});
+
+// 캔버스 클릭 이벤트: 새 텍스트 박스 생성
+canvas.addEventListener('click', (e) => {
+  if (e.target !== canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  socket.emit('textEvent', {
+    fnc: 'new',
+    type: 'text',
+    cLocate: { x, y },
+    cFont: 'Arial',
+    cColor: '#000000',
+    cSize: 14,
+    cContent: ''
+  });
+});
+
+// 버튼으로도 텍스트 박스 생성
+createTextBtn.addEventListener('click', () => {
+  socket.emit('textEvent', {
+    fnc: 'new',
+    type: 'text',
+    cLocate: { x: 100 + Math.random() * 400, y: 100 + Math.random() * 300 },
+    cFont: 'Arial',
+    cColor: '#000000',
+    cSize: 14,
+    cContent: ''
+  });
+});
+
+// 텍스트 박스 추가 함수
+function addTextBoxElement(box) {
+  if (textBoxElements[box.node]) return;
+  const el = document.createElement('div');
+  el.className = 'text-box';
+  el.contentEditable = true;
+  el.style.left = (box.x ?? box.cLocate?.x ?? 100) + 'px';
+  el.style.top = (box.y ?? box.cLocate?.y ?? 100) + 'px';
+  el.style.width = (box.width ?? box.cScale?.width ?? 180) + 'px';
+  el.style.height = (box.height ?? box.cScale?.height ?? 100) + 'px';
+  el.textContent = box.text ?? box.cContent ?? '';
+  el.tabIndex = 0;
+
+  // 스타일 적용
+  if (box.font || box.cFont) el.style.fontFamily = box.font || box.cFont;
+  if (box.color || box.cColor) el.style.color = box.color || box.cColor;
+  if (box.size || box.cSize) el.style.fontSize = (box.size || box.cSize) + 'px';
+
+  // 삭제 버튼
+  const delBtn = document.createElement('button');
+  delBtn.className = 'delete-btn';
+  delBtn.textContent = 'X';
+  delBtn.onclick = (e) => {
+    e.stopPropagation();
+    socket.emit('textEvent', { 
+      fnc: 'delete', 
+      type: 'text',
+      node: box.node 
+    });
+  };
+  el.appendChild(delBtn);
+
+  // 내용 수정
+  el.addEventListener('input', (e) => {
+    const text = e.target.textContent.replace('X','').trim();
+    socket.emit('textEvent', {
+      fnc: 'update',
+      type: 'text',
+      node: box.node,
+      cContent: text,
+      cFont: el.style.fontFamily,
+      cColor: el.style.color,
+      cSize: parseInt(el.style.fontSize),
+    });
+  });
+
+  // 이동/크기조절
+  let isDragging = false, startX, startY, startLeft, startTop, startWidth, startHeight;
+
+  el.addEventListener('mousedown', (e) => {
+    if (e.target === delBtn) return;
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = parseInt(el.style.left);
+    startTop = parseInt(el.style.top);
+    startWidth = parseInt(el.style.width);
+    startHeight = parseInt(el.style.height);
+
+    // 크기 조절: 오른쪽 아래 모서리 클릭
+    if (e.offsetX > el.offsetWidth - 16 && e.offsetY > el.offsetHeight - 16) {
+      document.onmousemove = (ev) => {
+        let newWidth = Math.max(60, startWidth + (ev.clientX - startX));
+        let newHeight = Math.max(30, startHeight + (ev.clientY - startY));
+        el.style.width = newWidth + 'px';
+        el.style.height = newHeight + 'px';
+        socket.emit('textEvent', {
+          fnc: 'move',
+          type: 'text',
+          node: box.node,
+          cLocate: { x: startLeft, y: startTop },
+          cScale: { width: newWidth, height: newHeight }
+        });
+      };
+    } else {
+      // 이동
+      document.onmousemove = (ev) => {
+        let newLeft = startLeft + (ev.clientX - startX);
+        let newTop = startTop + (ev.clientY - startY);
+        el.style.left = newLeft + 'px';
+        el.style.top = newTop + 'px';
+        socket.emit('textEvent', {
+          fnc: 'move',
+          type: 'text',
+          node: box.node,
+          cLocate: { x: newLeft, y: newTop },
+          cScale: { width: startWidth, height: startHeight }
+        });
+      };
+    }
+
+    document.onmouseup = () => {
+      isDragging = false;
+      document.onmousemove = null;
+      document.onmouseup = null;
+    };
+  });
+
+  canvas.appendChild(el);
+  textBoxElements[box.node] = el;
+}
+
+// 텍스트 박스 업데이트 함수
+function updateTextBoxElement(box) {
+  const el = textBoxElements[box.node];
+  if (!el) return;
+  if (box.cLocate) {
+    el.style.left = box.cLocate.x + 'px';
+    el.style.top = box.cLocate.y + 'px';
+  }
+  if (box.cScale) {
+    el.style.width = box.cScale.width + 'px';
+    el.style.height = box.cScale.height + 'px';
+  }
+  el.textContent = box.cContent ?? box.text ?? '';
+  if (box.cFont) el.style.fontFamily = box.cFont;
+  if (box.cColor) el.style.color = box.cColor;
+  if (box.cSize) el.style.fontSize = box.cSize + 'px';
+
+  // 삭제 버튼 다시 추가
+  if (!el.querySelector('.delete-btn')) {
+    const delBtn = document.createElement('button');
+    delBtn.className = 'delete-btn';
+    delBtn.textContent = 'X';
+    delBtn.onclick = (e) => {
+      e.stopPropagation();
+      socket.emit('textEvent', { 
+        fnc: 'delete', 
+        type: 'text',
+        node: box.node 
+      });
+    };
+    el.appendChild(delBtn);
+  }
+}
+</script>
+</body>
+</html>
