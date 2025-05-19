@@ -1,230 +1,419 @@
-<!DOCTYPE html>
+<!-- <!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>실시간 텍스트 협업</title>
+  <title>실시간 텍스트/투표 협업</title>
   <style>
-    /* ... (기존 스타일 동일) ... */
+    body { font-family: sans-serif; margin: 30px; }
+    #canvas { position: relative; width: 900px; height: 600px; border: 1px solid #aaa; background: #f8f8f8; }
+    .text-box, .vote-box {
+      position: absolute; border: 1px solid #888; border-radius: 8px; background: #fff;
+      box-shadow: 1px 2px 4px #0001; padding: 8px 8px 8px 16px; min-width: 80px; min-height: 40px;
+      box-sizing: border-box;
+    }
+    .text-box[contenteditable="true"] { outline: 1px dashed #aaa; }
+    .delete-btn { position: absolute; top: 4px; right: 4px; font-size: 12px; }
+    .vote-title { font-size: 18px; margin-bottom: 10px; }
+    .vote-list { list-style: none; padding: 0; margin: 0; }
+    .vote-list li { margin-bottom: 7px; }
+    .vote-btn { margin-right: 8px; }
+    .result { color: #555; font-size: 14px; margin-left: 10px; }
+    .toolbar { margin-bottom: 18px; }
   </style>
 </head>
 <body>
-  <h1>실시간 텍스트 협업 예제</h1>
-  <div>
+  <h1>실시간 텍스트/투표 협업 예제</h1>
+  <div class="toolbar">
     <button id="createText">텍스트 상자 만들기</button>
+    <button id="createVote">투표 박스 만들기</button>
   </div>
   <div id="canvas"></div>
   <script src="http://localhost:3000/socket.io/socket.io.js"></script>
-<script>
-const socket = io('http://localhost:3000');
-const canvas = document.getElementById('canvas');
-const createTextBtn = document.getElementById('createText');
-const textBoxElements = {};
+  <script>
+    // 임시 유저/팀/프로젝트 ID
+    const uId = 'user123';
+    const tId = 1;
+    const pId = 1;
 
-// 팀/유저 정보 입력
-const uId = prompt('유저ID를 입력하세요', 'user1');
-const tId = prompt('팀ID를 입력하세요', '1');
-socket.emit('joinTeam', { uId, tId });
+    const socket = io('http://localhost:3000');
+    const canvas = document.getElementById('canvas');
+    const createTextBtn = document.getElementById('createText');
+    const createVoteBtn = document.getElementById('createVote');
+    const textBoxElements = {};
+    const voteBoxElements = {};
 
-// 초기 데이터 수신
-socket.on('initialize', (boxes) => {
-  boxes.forEach(addTextBoxElement);
-});
+    // 팀/프로젝트 입장
+    socket.emit('joinTeam', { uId, tId, pId });
 
-// 새 텍스트 박스 추가
-socket.on('addTextBox', addTextBoxElement);
-
-// 텍스트 박스 업데이트
-socket.on('updateTextBox', updateTextBoxElement);
-
-// 텍스트 박스 이동/크기조절
-socket.on('moveTextBox', (data) => {
-  const { node, cLocate, cScale } = data;
-  const el = textBoxElements[node];
-  if (!el) return;
-  if (cLocate) {
-    el.style.left = cLocate.x + 'px';
-    el.style.top = cLocate.y + 'px';
-  }
-  if (cScale) {
-    el.style.width = cScale.width + 'px';
-    el.style.height = cScale.height + 'px';
-  }
-});
-
-// 텍스트 박스 삭제
-socket.on('removeTextBox', (data) => {
-  const node = typeof data === 'object' ? data.node : data;
-  if (textBoxElements[node]) {
-    textBoxElements[node].remove();
-    delete textBoxElements[node];
-  }
-});
-
-// 캔버스 클릭 이벤트: 새 텍스트 박스 생성
-canvas.addEventListener('click', (e) => {
-  if (e.target !== canvas) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
-  socket.emit('textEvent', {
-    fnc: 'new',
-    type: 'text',
-    cLocate: { x, y },
-    cFont: 'Arial',
-    cColor: '#000000',
-    cSize: 14,
-    cContent: ''
-  });
-});
-
-// 버튼으로도 텍스트 박스 생성
-createTextBtn.addEventListener('click', () => {
-  socket.emit('textEvent', {
-    fnc: 'new',
-    type: 'text',
-    cLocate: { x: 100 + Math.random() * 400, y: 100 + Math.random() * 300 },
-    cFont: 'Arial',
-    cColor: '#000000',
-    cSize: 14,
-    cContent: ''
-  });
-});
-
-// 텍스트 박스 추가 함수
-function addTextBoxElement(box) {
-  if (textBoxElements[box.node]) return;
-  const el = document.createElement('div');
-  el.className = 'text-box';
-  el.contentEditable = true;
-  el.style.left = (box.x ?? box.cLocate?.x ?? 100) + 'px';
-  el.style.top = (box.y ?? box.cLocate?.y ?? 100) + 'px';
-  el.style.width = (box.width ?? box.cScale?.width ?? 180) + 'px';
-  el.style.height = (box.height ?? box.cScale?.height ?? 100) + 'px';
-  el.textContent = box.text ?? box.cContent ?? '';
-  el.tabIndex = 0;
-
-  // 스타일 적용
-  if (box.font || box.cFont) el.style.fontFamily = box.font || box.cFont;
-  if (box.color || box.cColor) el.style.color = box.color || box.cColor;
-  if (box.size || box.cSize) el.style.fontSize = (box.size || box.cSize) + 'px';
-
-  // 삭제 버튼
-  const delBtn = document.createElement('button');
-  delBtn.className = 'delete-btn';
-  delBtn.textContent = 'X';
-  delBtn.onclick = (e) => {
-    e.stopPropagation();
-    socket.emit('textEvent', { 
-      fnc: 'delete', 
-      type: 'text',
-      node: box.node 
+    // 텍스트박스 초기화
+    socket.on('initialize', (boxes) => {
+      boxes.forEach(addTextBoxElement);
     });
-  };
-  el.appendChild(delBtn);
 
-  // 내용 수정
-  el.addEventListener('input', (e) => {
-    const text = e.target.textContent.replace('X','').trim();
-    socket.emit('textEvent', {
-      fnc: 'update',
-      type: 'text',
-      node: box.node,
-      cContent: text,
-      cFont: el.style.fontFamily,
-      cColor: el.style.color,
-      cSize: parseInt(el.style.fontSize),
+    // 투표박스 초기화
+    socket.on('initializeVotes', (votes) => {
+      votes.forEach(addVoteBoxElement);
     });
-  });
 
-  // 이동/크기조절
-  let isDragging = false, startX, startY, startLeft, startTop, startWidth, startHeight;
+    // 텍스트박스 실시간 이벤트
+    socket.on('addTextBox', addTextBoxElement);
+    socket.on('updateTextBox', updateTextBoxElement);
+    socket.on('moveTextBox', updateTextBoxElement);
+    socket.on('removeTextBox', (data) => {
+      const node = typeof data === 'object' ? data.node : data;
+      if (textBoxElements[node]) {
+        textBoxElements[node].remove();
+        delete textBoxElements[node];
+      }
+    });
 
-  el.addEventListener('mousedown', (e) => {
-    if (e.target === delBtn) return;
-    isDragging = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    startLeft = parseInt(el.style.left);
-    startTop = parseInt(el.style.top);
-    startWidth = parseInt(el.style.width);
-    startHeight = parseInt(el.style.height);
+    // 투표박스 실시간 이벤트
+    socket.on('addVote', addVoteBoxElement);
+    socket.on('updateVote', updateVoteBoxElement);
+    socket.on('moveVote', updateVoteBoxElement);
+    socket.on('removeVote', (data) => {
+      const node = typeof data === 'object' ? data.node : data;
+      if (voteBoxElements[node]) {
+        voteBoxElements[node].remove();
+        delete voteBoxElements[node];
+      }
+    });
 
-    // 크기 조절: 오른쪽 아래 모서리 클릭
-    if (e.offsetX > el.offsetWidth - 16 && e.offsetY > el.offsetHeight - 16) {
-      document.onmousemove = (ev) => {
-        let newWidth = Math.max(60, startWidth + (ev.clientX - startX));
-        let newHeight = Math.max(30, startHeight + (ev.clientY - startY));
-        el.style.width = newWidth + 'px';
-        el.style.height = newHeight + 'px';
+    // 텍스트박스 생성 (버튼)
+    createTextBtn.addEventListener('click', () => {
+      socket.emit('textEvent', {
+        fnc: 'new',
+        type: 'text',
+        cLocate: { x: 100 + Math.random() * 400, y: 100 + Math.random() * 300 },
+        cFont: 'Arial',
+        cColor: '#000000',
+        cSize: 16,
+        cContent: ''
+      });
+    });
+
+    // 투표박스 생성 (버튼)
+    createVoteBtn.addEventListener('click', () => {
+      // 예시: 4개 항목 고정, 제목은 랜덤
+      const cTitle = '실시간 투표 예제 ' + Math.floor(Math.random() * 1000);
+      const cList = [
+        { num: 1, content: '항목 1' },
+        { num: 2, content: '항목 2' },
+        { num: 3, content: '항목 3' },
+        { num: 4, content: '항목 4' }
+      ];
+      socket.emit('vote', {
+        fnc: 'new',
+        type: 'vote',
+        cLocate: { x: 150 + Math.random() * 400, y: 150 + Math.random() * 300 },
+        cScale: { width: 300, height: 180 },
+        cTitle,
+        cList
+      });
+    });
+
+    // 캔버스 클릭: 텍스트박스 생성
+    canvas.addEventListener('click', (e) => {
+      if (e.target !== canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      socket.emit('textEvent', {
+        fnc: 'new',
+        type: 'text',
+        cLocate: { x, y },
+        cFont: 'Arial',
+        cColor: '#000000',
+        cSize: 16,
+        cContent: ''
+      });
+    });
+
+    // 텍스트박스 추가 함수
+    function addTextBoxElement(box) {
+      if (textBoxElements[box.node]) return;
+      const el = document.createElement('div');
+      el.className = 'text-box';
+      el.contentEditable = true;
+      el.style.left = (box.x ?? box.cLocate?.x ?? 100) + 'px';
+      el.style.top = (box.y ?? box.cLocate?.y ?? 100) + 'px';
+      el.style.width = (box.width ?? box.cScale?.width ?? 180) + 'px';
+      el.style.height = (box.height ?? box.cScale?.height ?? 100) + 'px';
+      el.textContent = box.text ?? box.cContent ?? '';
+      el.tabIndex = 0;
+      if (box.font || box.cFont) el.style.fontFamily = box.font || box.cFont;
+      if (box.color || box.cColor) el.style.color = box.color || box.cColor;
+      if (box.size || box.cSize) el.style.fontSize = (box.size || box.cSize) + 'px';
+
+      // 삭제 버튼
+      const delBtn = document.createElement('button');
+      delBtn.className = 'delete-btn';
+      delBtn.textContent = 'X';
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        socket.emit('textEvent', { fnc: 'delete', type: 'text', node: box.node });
+      };
+      el.appendChild(delBtn);
+
+      // 내용 수정
+      el.addEventListener('input', (e) => {
+        const text = e.target.textContent.replace('X','').trim();
         socket.emit('textEvent', {
-          fnc: 'move',
+          fnc: 'update',
           type: 'text',
           node: box.node,
-          cLocate: { x: startLeft, y: startTop },
-          cScale: { width: newWidth, height: newHeight }
+          cContent: text,
+          cFont: el.style.fontFamily,
+          cColor: el.style.color,
+          cSize: parseInt(el.style.fontSize),
         });
-      };
-    } else {
-      // 이동
-      document.onmousemove = (ev) => {
-        let newLeft = startLeft + (ev.clientX - startX);
-        let newTop = startTop + (ev.clientY - startY);
-        el.style.left = newLeft + 'px';
-        el.style.top = newTop + 'px';
-        socket.emit('textEvent', {
-          fnc: 'move',
-          type: 'text',
-          node: box.node,
-          cLocate: { x: newLeft, y: newTop },
-          cScale: { width: startWidth, height: startHeight }
-        });
-      };
+      });
+
+      // 이동/크기조절
+      let isDragging = false, startX, startY, startLeft, startTop, startWidth, startHeight;
+      el.addEventListener('mousedown', (e) => {
+        if (e.target === delBtn) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = parseInt(el.style.left);
+        startTop = parseInt(el.style.top);
+        startWidth = parseInt(el.style.width);
+        startHeight = parseInt(el.style.height);
+
+        // 크기 조절: 오른쪽 아래 모서리 클릭
+        if (e.offsetX > el.offsetWidth - 16 && e.offsetY > el.offsetHeight - 16) {
+          document.onmousemove = (ev) => {
+            let newWidth = Math.max(60, startWidth + (ev.clientX - startX));
+            let newHeight = Math.max(30, startHeight + (ev.clientY - startY));
+            el.style.width = newWidth + 'px';
+            el.style.height = newHeight + 'px';
+            socket.emit('textEvent', {
+              fnc: 'move',
+              type: 'text',
+              node: box.node,
+              cLocate: { x: startLeft, y: startTop },
+              cScale: { width: newWidth, height: newHeight }
+            });
+          };
+        } else {
+          // 이동
+          document.onmousemove = (ev) => {
+            let newLeft = startLeft + (ev.clientX - startX);
+            let newTop = startTop + (ev.clientY - startY);
+            el.style.left = newLeft + 'px';
+            el.style.top = newTop + 'px';
+            socket.emit('textEvent', {
+              fnc: 'move',
+              type: 'text',
+              node: box.node,
+              cLocate: { x: newLeft, y: newTop },
+              cScale: { width: startWidth, height: startHeight }
+            });
+          };
+        }
+        document.onmouseup = () => {
+          isDragging = false;
+          document.onmousemove = null;
+          document.onmouseup = null;
+        };
+      });
+
+      canvas.appendChild(el);
+      textBoxElements[box.node] = el;
     }
 
-    document.onmouseup = () => {
-      isDragging = false;
-      document.onmousemove = null;
-      document.onmouseup = null;
-    };
-  });
+    // 텍스트박스 업데이트 함수
+    function updateTextBoxElement(box) {
+      const el = textBoxElements[box.node];
+      if (!el) return;
+      if (box.cLocate) {
+        el.style.left = box.cLocate.x + 'px';
+        el.style.top = box.cLocate.y + 'px';
+      }
+      if (box.cScale) {
+        el.style.width = box.cScale.width + 'px';
+        el.style.height = box.cScale.height + 'px';
+      }
+      el.textContent = box.cContent ?? box.text ?? '';
+      if (box.cFont) el.style.fontFamily = box.cFont;
+      if (box.cColor) el.style.color = box.cColor;
+      if (box.cSize) el.style.fontSize = box.cSize + 'px';
+      // 삭제 버튼 다시 추가
+      if (!el.querySelector('.delete-btn')) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'delete-btn';
+        delBtn.textContent = 'X';
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          socket.emit('textEvent', { fnc: 'delete', type: 'text', node: box.node });
+        };
+        el.appendChild(delBtn);
+      }
+    }
 
-  canvas.appendChild(el);
-  textBoxElements[box.node] = el;
-}
+    // 투표박스 추가 함수
+    function addVoteBoxElement(vote) {
+      if (voteBoxElements[vote.node]) return;
+      const el = document.createElement('div');
+      el.className = 'vote-box';
+      el.style.left = (vote.x ?? vote.cLocate?.x ?? 200) + 'px';
+      el.style.top = (vote.y ?? vote.cLocate?.y ?? 200) + 'px';
+      el.style.width = (vote.width ?? vote.cScale?.width ?? 300) + 'px';
+      el.style.height = (vote.height ?? vote.cScale?.height ?? 180) + 'px';
+      el.tabIndex = 0;
 
-// 텍스트 박스 업데이트 함수
-function updateTextBoxElement(box) {
-  const el = textBoxElements[box.node];
-  if (!el) return;
-  if (box.cLocate) {
-    el.style.left = box.cLocate.x + 'px';
-    el.style.top = box.cLocate.y + 'px';
-  }
-  if (box.cScale) {
-    el.style.width = box.cScale.width + 'px';
-    el.style.height = box.cScale.height + 'px';
-  }
-  el.textContent = box.cContent ?? box.text ?? '';
-  if (box.cFont) el.style.fontFamily = box.cFont;
-  if (box.cColor) el.style.color = box.cColor;
-  if (box.cSize) el.style.fontSize = box.cSize + 'px';
+      // 제목
+      const titleDiv = document.createElement('div');
+      titleDiv.className = 'vote-title';
+      titleDiv.textContent = vote.title ?? vote.cTitle ?? '';
+      el.appendChild(titleDiv);
 
-  // 삭제 버튼 다시 추가
-  if (!el.querySelector('.delete-btn')) {
-    const delBtn = document.createElement('button');
-    delBtn.className = 'delete-btn';
-    delBtn.textContent = 'X';
-    delBtn.onclick = (e) => {
-      e.stopPropagation();
-      socket.emit('textEvent', { 
-        fnc: 'delete', 
-        type: 'text',
-        node: box.node 
+      // 항목 리스트
+      const ul = document.createElement('ul');
+      ul.className = 'vote-list';
+      (vote.list ?? vote.cList ?? []).forEach(item => {
+        const li = document.createElement('li');
+        // 투표 버튼
+        const btn = document.createElement('button');
+        btn.className = 'vote-btn';
+        btn.textContent = '투표';
+        btn.onclick = () => {
+          socket.emit('vote', {
+            fnc: 'choice',
+            type: 'vote',
+            node: vote.node,
+            user: uId,
+            num: item.num
+          });
+        };
+        li.appendChild(btn);
+        // 항목 내용
+        const span = document.createElement('span');
+        span.textContent = item.content;
+        li.appendChild(span);
+        // 득표수
+        const result = document.createElement('span');
+        result.className = 'result';
+        result.innerHTML = `(득표: <b>${item.count ?? 0}</b>명)`;
+        li.appendChild(result);
+        ul.appendChild(li);
       });
-    };
-    el.appendChild(delBtn);
-  }
-}
-</script>
+      el.appendChild(ul);
+
+      // 삭제 버튼
+      const delBtn = document.createElement('button');
+      delBtn.className = 'delete-btn';
+      delBtn.textContent = 'X';
+      delBtn.onclick = (e) => {
+        e.stopPropagation();
+        socket.emit('vote', { fnc: 'delete', type: 'vote', node: vote.node });
+      };
+      el.appendChild(delBtn);
+
+      // 이동/크기조절
+      let isDragging = false, startX, startY, startLeft, startTop, startWidth, startHeight;
+      el.addEventListener('mousedown', (e) => {
+        if (e.target === delBtn) return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = parseInt(el.style.left);
+        startTop = parseInt(el.style.top);
+        startWidth = parseInt(el.style.width);
+        startHeight = parseInt(el.style.height);
+
+        // 크기 조절: 오른쪽 아래 모서리 클릭
+        if (e.offsetX > el.offsetWidth - 16 && e.offsetY > el.offsetHeight - 16) {
+          document.onmousemove = (ev) => {
+            let newWidth = Math.max(120, startWidth + (ev.clientX - startX));
+            let newHeight = Math.max(60, startHeight + (ev.clientY - startY));
+            el.style.width = newWidth + 'px';
+            el.style.height = newHeight + 'px';
+            socket.emit('vote', {
+              fnc: 'move',
+              type: 'vote',
+              node: vote.node,
+              cLocate: { x: startLeft, y: startTop },
+              cScale: { width: newWidth, height: newHeight }
+            });
+          };
+        } else {
+          // 이동
+          document.onmousemove = (ev) => {
+            let newLeft = startLeft + (ev.clientX - startX);
+            let newTop = startTop + (ev.clientY - startY);
+            el.style.left = newLeft + 'px';
+            el.style.top = newTop + 'px';
+            socket.emit('vote', {
+              fnc: 'move',
+              type: 'vote',
+              node: vote.node,
+              cLocate: { x: newLeft, y: newTop },
+              cScale: { width: startWidth, height: startHeight }
+            });
+          };
+        }
+        document.onmouseup = () => {
+          isDragging = false;
+          document.onmousemove = null;
+          document.onmouseup = null;
+        };
+      });
+
+      canvas.appendChild(el);
+      voteBoxElements[vote.node] = el;
+    }
+
+    // 투표박스 업데이트 함수
+    function updateVoteBoxElement(vote) {
+      const el = voteBoxElements[vote.node];
+      if (!el) return;
+      if (vote.cLocate) {
+        el.style.left = vote.cLocate.x + 'px';
+        el.style.top = vote.cLocate.y + 'px';
+      }
+      if (vote.cScale) {
+        el.style.width = vote.cScale.width + 'px';
+        el.style.height = vote.cScale.height + 'px';
+      }
+      // 제목
+      const titleDiv = el.querySelector('.vote-title');
+      if (titleDiv) titleDiv.textContent = vote.cTitle ?? vote.title ?? '';
+      // 항목 리스트
+      const ul = el.querySelector('.vote-list');
+      if (ul) {
+        ul.innerHTML = '';
+        (vote.cList ?? vote.list ?? []).forEach(item => {
+          const li = document.createElement('li');
+          const btn = document.createElement('button');
+          btn.className = 'vote-btn';
+          btn.textContent = '투표';
+          btn.onclick = () => {
+            socket.emit('vote', {
+              fnc: 'choice',
+              type: 'vote',
+              node: vote.node,
+              user: uId,
+              num: item.num
+            });
+          };
+          li.appendChild(btn);
+          const span = document.createElement('span');
+          span.textContent = item.content;
+          li.appendChild(span);
+          const result = document.createElement('span');
+          result.className = 'result';
+          result.innerHTML = `(득표: <b>${item.count ?? 0}</b>명)`;
+          li.appendChild(result);
+          ul.appendChild(li);
+        });
+      }
+    }
+
+    // 안내/에러 메시지
+    socket.on('info', msg => alert(msg.message));
+    socket.on('error', msg => alert(msg.message));
+  </script>
 </body>
-</html>
+</html> -->
