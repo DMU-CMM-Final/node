@@ -10,6 +10,8 @@ module.exports = function(io, socket, context) {
         const { fnc, node, cLocate, cScale, cTitle, cList, type = 'vote', user, num } = data;
 
         // 신규 생성
+
+        
         if (fnc === 'new') {
             const newNode = uuidv4();
             const x = cLocate?.x || 0;
