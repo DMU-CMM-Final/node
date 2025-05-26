@@ -3,17 +3,15 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const { db, queryPromise } = require('./dbConnector');
-const { upload, handleImageUpload } = require('./image');
+const { upload, handleImageUpload, imageHandlers } = require('./image');
+const textHandlers = require('./text');
+const voteHandlers = require('./vote');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
+  cors: { origin: '*', methods: ['GET', 'POST'] }
 });
-
 // 이미지만 외부에 제공
 //클라이언트(브라우저 등)가 이미지를 접근할 수 있도록 정적 파일 제공
 app.use('/uploads', express.static(path.join(__dirname, './public', 'uploads')));
@@ -26,6 +24,7 @@ app.post('/api/image/upload', upload.single('image'), (req, res) => {
 // 메모리 데이터
 let textBoxes = [];
 let votes = [];
+let images = [];
 
 // 데이터 초기화 함수
 async function initializeTextBoxes() {
@@ -86,48 +85,86 @@ async function initializeVotes() {
   }
 }
 
-const textHandlers = require('./text');
-const voteHandlers = require('./vote');
 
-initializeTextBoxes().then(() => initializeVotes().then(() => {
-  io.on('connection', (socket) => {
-    let currentTeamId = null;
-    let currentProjectId = null;
-    let currentUserId = null;
+async function initializeImages() {
+  try {
+    const imageItems = await queryPromise(
+      'SELECT Image.*, ProjectInfo.locate, ProjectInfo.scale FROM Image JOIN ProjectInfo ON Image.node = ProjectInfo.node AND Image.pId = ProjectInfo.pId AND Image.tId = ProjectInfo.tId WHERE ProjectInfo.dType = "image"'
+    );
+    images = imageItems.map(img => ({
+      node: img.node,
+      tId: img.tId,
+      pId: img.pId,
+      uId: img.uId,
+      fileName: img.fileName,
+      filePath: img.filePath,
+      mimeType: img.mimeType,
+      x: JSON.parse(img.locate).x,
+      y: JSON.parse(img.locate).y,
+      width: JSON.parse(img.scale).width,
+      height: JSON.parse(img.scale).height
+    }));
+  } catch (error) {
+    console.error('이미지 초기화 실패:', error);
+  }
+}
 
-    socket.on('joinTeam', async ({ uId, tId, pId }) => {
-      currentTeamId = tId;
-      currentProjectId = pId;
-      currentUserId = uId;
-      socket.join(String(currentTeamId));
-      const filteredTexts = textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId);
-      const filteredVotes = votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId);
-      socket.emit('init', { texts: filteredTexts, votes: filteredVotes });
-    });
+initializeTextBoxes()
+  .then(() => initializeVotes())
+  .then(() => initializeImages())
+  .then(() => {
+    io.on('connection', (socket) => {
+      let currentTeamId = null;
+      let currentProjectId = null;
+      let currentUserId = null;
 
-    textHandlers(io, socket, {
-      getCurrentTeamId: () => currentTeamId,
-      getCurrentProjectId: () => currentProjectId,
-      getCurrentUserId: () => currentUserId,
-      textBoxesRef: () => textBoxes,
-      setTextBoxes: (boxes) => { textBoxes = boxes; },
-      queryPromise
-    });
+      socket.on('joinTeam', async ({ uId, tId, pId }) => {
+        currentTeamId = tId;
+        currentProjectId = pId;
+        currentUserId = uId;
+        socket.join(String(currentTeamId));
+        const filteredTexts = textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId);
+        const filteredVotes = votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId);
+        const filteredImages = images.filter(img => img.tId == currentTeamId && img.pId == currentProjectId);
+        socket.emit('init', {
+          texts: filteredTexts,
+          votes: filteredVotes,
+          images: filteredImages
+        });
+      });
 
-    voteHandlers(io, socket, {
-      getCurrentTeamId: () => currentTeamId,
-      getCurrentProjectId: () => currentProjectId,
-      getCurrentUserId: () => currentUserId, 
-      votesRef: () => votes,
-      setVotes: (v) => { votes = v; },
-      queryPromise
-    });
+      textHandlers(io, socket, {
+        getCurrentTeamId: () => currentTeamId,
+        getCurrentProjectId: () => currentProjectId,
+        getCurrentUserId: () => currentUserId,
+        textBoxesRef: () => textBoxes,
+        setTextBoxes: (boxes) => { textBoxes = boxes; },
+        queryPromise
+      });
 
-    socket.on('disconnect', () => {
-      if (currentTeamId) socket.leave(String(currentTeamId));
+      voteHandlers(io, socket, {
+        getCurrentTeamId: () => currentTeamId,
+        getCurrentProjectId: () => currentProjectId,
+        getCurrentUserId: () => currentUserId,
+        votesRef: () => votes,
+        setVotes: (v) => { votes = v; },
+        queryPromise
+      });
+
+      imageHandlers(io, socket, {
+        getCurrentTeamId: () => currentTeamId,
+        getCurrentProjectId: () => currentProjectId,
+        getCurrentUserId: () => currentUserId,
+        imagesRef: () => images,
+        setImages: (imgs) => { images = imgs; },
+        queryPromise
+      });
+
+      socket.on('disconnect', () => {
+        if (currentTeamId) socket.leave(String(currentTeamId));
+      });
     });
   });
-}));
 
 server.listen(3000, () => {
   console.log('서버가 3000번 포트에서 실행 중입니다.');
