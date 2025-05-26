@@ -1,151 +1,168 @@
-const { queryPromise } = require('./dbConnector');
 const { v4: uuidv4 } = require('uuid');
 
-let textBoxes = [];
+module.exports = function(io, socket, context) {
+    socket.on('textEvent', async (data) => {
+        const currentTeamId = context.getCurrentTeamId();
+        const currentProjectId = context.getCurrentProjectId();
+        const currentUserId = context.getCurrentUserId();
+        let textBoxes = context.textBoxesRef();
 
-async function initializeTextBoxes() {
-  // DB에서 텍스트 박스 초기화
-  const textResults = await queryPromise('SELECT * FROM Text', []);
-  const textBoxesData = await Promise.all(textResults.map(async (row) => {
-    const infoResults = await queryPromise(
-      'SELECT locate, scale FROM ProjectInfo WHERE node = ? AND tId = ?',
-      [row.node, row.tId]
-    );
-    let locate = { x: 0, y: 0 };
-    let scale = { width: 180, height: 100 };
-    if (infoResults.length > 0) {
-      if (infoResults[0].locate) locate = JSON.parse(infoResults[0].locate);
-      if (infoResults[0].scale) scale = JSON.parse(infoResults[0].scale);
-    }
-    return {
-      node: row.node,
-      tId: row.tId,
-      uId: row.uId,
-      x: locate.x,
-      y: locate.y,
-      width: scale.width,
-      height: scale.height,
-      font: row.font || 'Arial',
-      color: row.color || '#000000',
-      size: row.fontSize || 14,
-      text: row.content || ''
-    };
-  }));
-  textBoxes = textBoxesData;
-  return textBoxes;
-}
+        if (!currentTeamId || !currentProjectId) return;
+        const { fnc, node, cLocate, cFont, cColor, cSize, cContent, cScale, type = 'text' } = data;
 
-function getTeamTextBoxes(teamId) {
-  return textBoxes.filter(box => box.tId == teamId);
-}
+        // 신규 생성
+        if (fnc === 'new') {
+            const newNode = uuidv4();
+            const width = cScale?.width || 180;
+            const height = cScale?.height || 100;
+            const x = cLocate?.x || 0;
+            const y = cLocate?.y || 0;
+            const box = {
+                node: newNode,
+                tId: currentTeamId,
+                pId: currentProjectId,
+                uId: currentUserId,
+                x, y, width, height,
+                font: cFont || 'Arial',
+                color: cColor || '#000000',
+                size: cSize || 14,
+                text: cContent || ''
+            };
+            textBoxes.push(box);
+            context.setTextBoxes(textBoxes);
+            try {
+                await context.queryPromise(
+                    'INSERT INTO Text (node, pId, tId, uId, content, font, color, fontSize) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [newNode, currentProjectId, currentTeamId, currentUserId, cContent || '', cFont || 'Arial', cColor || '#000000', cSize || 14]
+                );
+                await context.queryPromise(
+                    'INSERT INTO ProjectInfo (node, pId, tId, dType, locate, scale) VALUES (?, ?, ?, ?, ?, ?)',
+                    [newNode, currentProjectId, currentTeamId, 'text', JSON.stringify({ x, y }), JSON.stringify({ width, height })]
+                );
+            } catch (error) {
+                console.error('새 텍스트 박스 저장 실패:', error);
+            }
+            const responseData = {
+                type, fnc, node: newNode,
+                tId: currentTeamId,
+                pId: currentProjectId,
+                cLocate: { x, y },
+                cScale: { width, height },
+                cFont: box.font, cColor: box.color, cSize: box.size,
+                cContent: box.text
+            };
+            io.to(String(currentTeamId)).emit('addTextBox', responseData);
+        }
 
-async function addTextBox(data, teamId, userId) {
-  const newNode = uuidv4();
-  const width = data.cScale?.width || 180;
-  const height = data.cScale?.height || 100;
-  const x = data.cLocate?.x || 0;
-  const y = data.cLocate?.y || 0;
-  const box = {
-    node: newNode,
-    tId: teamId,
-    uId: userId,
-    x, y, width, height,
-    font: data.cFont || 'Arial',
-    color: data.cColor || '#000000',
-    size: data.cSize || 14,
-    text: data.cContent || ''
-  };
-  textBoxes.push(box);
-  await queryPromise(
-    'INSERT INTO Text (node, pId, tId, uId, content, font, color, fontSize) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    [newNode, 1, teamId, userId, box.text, box.font, box.color, box.size]
-  );
-  await queryPromise(
-    'INSERT INTO ProjectInfo (node, pId, tId, dType, locate, scale) VALUES (?, ?, ?, ?, ?, ?)',
-    [newNode, 1, teamId, 'text', JSON.stringify({ x, y }), JSON.stringify({ width, height })]
-  );
-  return {
-    type: data.type || 'text',
-    fnc: 'new',
-    node: newNode,
-    tId: teamId,
-    cLocate: { x, y },
-    cScale: { width, height },
-    cFont: box.font,
-    cColor: box.color,
-    cSize: box.size,
-    cContent: box.text
-  };
-}
+        // 수정
+        else if (fnc === 'update') {
+            const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
+            if (idx >= 0) {
+                const box = textBoxes[idx];
+                if (cContent !== undefined) box.text = cContent;
+                if (cFont !== undefined) box.font = cFont;
+                if (cColor !== undefined) box.color = cColor;
+                if (cSize !== undefined) box.size = cSize;
+                try {
+                    await context.queryPromise(
+                        'UPDATE Text SET content = ?, font = ?, color = ?, fontSize = ? WHERE node = ? AND pId = ? AND tId = ?',
+                        [box.text, box.font, box.color, box.size, node, currentProjectId, currentTeamId]
+                    );
+                } catch (error) {
+                    console.error('텍스트 박스 업데이트 실패:', error);
+                }
+                const responseData = {
+                    type, fnc, node,
+                    tId: currentTeamId,
+                    pId: currentProjectId,
+                    cContent: box.text,
+                    cFont: box.font,
+                    cColor: box.color,
+                    cSize: box.size
+                };
+                io.to(String(currentTeamId)).emit('updateTextBox', responseData);
+            }
+        }
 
-async function updateTextBox(data, teamId) {
-  const box = textBoxes.find(b => b.node === data.node && b.tId == teamId);
-  if (!box) return null;
-  if (data.cFont !== undefined) box.font = data.cFont;
-  if (data.cColor !== undefined) box.color = data.cColor;
-  if (data.cSize !== undefined) box.size = data.cSize;
-  if (data.cContent !== undefined) box.text = data.cContent;
-  await queryPromise(
-    'UPDATE Text SET content = ?, font = ?, color = ?, fontSize = ? WHERE node = ? AND tId = ?',
-    [box.text, box.font, box.color, box.size, data.node, teamId]
-  );
-  return {
-    type: data.type || 'text',
-    fnc: 'update',
-    node: box.node,
-    cFont: box.font,
-    cColor: box.color,
-    cSize: box.size,
-    cContent: box.text,
-    tId: teamId
-  };
-}
+        // 이동
+        else if (fnc === 'move') {
+            const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
+            if (idx >= 0) {
+                const box = textBoxes[idx];
+                if (cLocate) {
+                    box.x = cLocate.x;
+                    box.y = cLocate.y;
+                }
+                try {
+                    await context.queryPromise(
+                        'UPDATE ProjectInfo SET locate = ? WHERE node = ? AND pId = ? AND tId = ?',
+                        [JSON.stringify({ x: box.x, y: box.y }), node, currentProjectId, currentTeamId]
+                    );
+                } catch (error) {
+                    console.error('텍스트 박스 이동 실패:', error);
+                }
+                const responseData = {
+                    type, fnc, node,
+                    tId: currentTeamId,
+                    pId: currentProjectId,
+                    cLocate: { x: box.x, y: box.y }
+                };
+                io.to(String(currentTeamId)).emit('moveTextBox', responseData);
+            }
+        }
 
-async function moveTextBox(data, teamId, userId) {
-  const box = textBoxes.find(b => b.node === data.node && b.tId == teamId);
-  if (!box) return null;
-  if (data.cLocate) {
-    box.x = Number(data.cLocate.x);
-    box.y = Number(data.cLocate.y);
-  }
-  if (data.cScale) {
-    if (data.cScale.width !== undefined) box.width = data.cScale.width;
-    if (data.cScale.height !== undefined) box.height = data.cScale.height;
-  }
-  await queryPromise(
-    'UPDATE ProjectInfo SET locate = ?, scale = ? WHERE node = ? AND tId = ?',
-    [JSON.stringify({ x: box.x, y: box.y }), JSON.stringify({ width: box.width, height: box.height }), box.node, teamId]
-  );
-  return {
-    type: data.type || 'text',
-    fnc: 'move',
-    node: box.node,
-    tId: teamId,
-    uId: userId,
-    cLocate: { x: box.x, y: box.y },
-    cScale: { width: box.width, height: box.height }
-  };
-}
+        // 크기 조정
+        else if (fnc === 'resize') {
+            const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
+            if (idx >= 0) {
+                const box = textBoxes[idx];
+                if (cScale) {
+                    box.width = cScale.width;
+                    box.height = cScale.height;
+                }
+                try {
+                    await context.queryPromise(
+                        'UPDATE ProjectInfo SET scale = ? WHERE node = ? AND pId = ? AND tId = ?',
+                        [JSON.stringify({ width: box.width, height: box.height }), node, currentProjectId, currentTeamId]
+                    );
+                } catch (error) {
+                    console.error('텍스트 박스 크기 조정 실패:', error);
+                }
+                const responseData = {
+                    type, fnc, node,
+                    tId: currentTeamId,
+                    pId: currentProjectId,
+                    cScale: { width: box.width, height: box.height }
+                };
+                io.to(String(currentTeamId)).emit('resizeTextBox', responseData);
+            }
+        }
 
-async function deleteTextBox(data, teamId) {
-  const initialLength = textBoxes.length;
-  textBoxes = textBoxes.filter(b => !(b.node === data.node && b.tId == teamId));
-  if (initialLength === textBoxes.length) return null;
-  await queryPromise('DELETE FROM Text WHERE node = ? AND tId = ?', [data.node, teamId]);
-  await queryPromise('DELETE FROM ProjectInfo WHERE node = ? AND tId = ?', [data.node, teamId]);
-  return {
-    type: data.type || 'text',
-    fnc: 'delete',
-    node: data.node,
-    tId: teamId
-  };
-}
-
-module.exports = {
-  initializeTextBoxes,
-  getTeamTextBoxes,
-  addTextBox,
-  updateTextBox,
-  moveTextBox,
-  deleteTextBox
+        // 삭제
+        else if (fnc === 'delete') {
+            const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
+            if (idx >= 0) {
+                textBoxes.splice(idx, 1);
+                context.setTextBoxes(textBoxes);
+                try {
+                    await context.queryPromise(
+                        'DELETE FROM Text WHERE node = ? AND pId = ? AND tId = ?',
+                        [node, currentProjectId, currentTeamId]
+                    );
+                    await context.queryPromise(
+                        'DELETE FROM ProjectInfo WHERE node = ? AND pId = ? AND tId = ?',
+                        [node, currentProjectId, currentTeamId]
+                    );
+                } catch (error) {
+                    console.error('텍스트 박스 삭제 실패:', error);
+                }
+                const responseData = {
+                    type, fnc, node,
+                    tId: currentTeamId,
+                    pId: currentProjectId
+                };
+                io.to(String(currentTeamId)).emit('deleteTextBox', responseData);
+            }
+        }
+    });
 };
