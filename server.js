@@ -12,9 +12,6 @@ const server = http.createServer(app);
 const io = socketIo(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
-// 이미지만 외부에 제공
-//클라이언트(브라우저 등)가 이미지를 접근할 수 있도록 정적 파일 제공
-app.use('/uploads', express.static(path.join(__dirname, './public', 'uploads')));
 
 // 이미지 업로드 API
 app.post('/api/image/upload', upload.single('image'), (req, res) => {
@@ -85,11 +82,10 @@ async function initializeVotes() {
   }
 }
 
-
 async function initializeImages() {
   try {
     const imageItems = await queryPromise(
-      'SELECT Image.*, ProjectInfo.locate, ProjectInfo.scale FROM Image JOIN ProjectInfo ON Image.node = ProjectInfo.node AND Image.pId = ProjectInfo.pId AND Image.tId = ProjectInfo.tId WHERE ProjectInfo.dType = "image"'
+      'SELECT Image.node, Image.pId, Image.tId, Image.uId, Image.fileName, Image.mimeType, ProjectInfo.locate, ProjectInfo.scale FROM Image JOIN ProjectInfo ON Image.node = ProjectInfo.node AND Image.pId = ProjectInfo.pId AND Image.tId = ProjectInfo.tId WHERE ProjectInfo.dType = "image"'
     );
     images = imageItems.map(img => ({
       node: img.node,
@@ -97,7 +93,6 @@ async function initializeImages() {
       pId: img.pId,
       uId: img.uId,
       fileName: img.fileName,
-      filePath: img.filePath,
       mimeType: img.mimeType,
       x: JSON.parse(img.locate).x,
       y: JSON.parse(img.locate).y,
@@ -108,6 +103,23 @@ async function initializeImages() {
     console.error('이미지 초기화 실패:', error);
   }
 }
+// 이미지 불러오기 API
+app.get('/api/image/:node/:pId/:tId', async (req, res) => {
+  const { node, pId, tId } = req.params;
+  try {
+    const [image] = await queryPromise(
+      'SELECT imageData, mimeType FROM Image WHERE node = ? AND pId = ? AND tId = ?',
+      [node, pId, tId]
+    );
+    if (!image) return res.status(404).send('이미지 없음');
+    res.set('Content-Type', image.mimeType);
+    res.send(image.imageData);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('서버 오류');
+  }
+});
+
 
 initializeTextBoxes()
   .then(() => initializeVotes())

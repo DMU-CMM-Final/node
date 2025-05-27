@@ -100,7 +100,7 @@ module.exports = function(io, socket, context) {
             [JSON.stringify({ width: vote.width, height: vote.height }), node, currentProjectId, currentTeamId]
           );
         }
-        io.to(String(currentTeamId)).emit('moveVote', {
+        socket.to(String(currentTeamId)).emit('moveVote', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId,
@@ -128,7 +128,7 @@ module.exports = function(io, socket, context) {
         } catch (error) {
           console.error('투표 삭제 실패:', error);
         }
-        io.to(String(currentTeamId)).emit('deleteVote', {
+        socket.to(String(currentTeamId)).emit('removeVote', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId

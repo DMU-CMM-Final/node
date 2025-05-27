@@ -80,63 +80,43 @@ module.exports = function(io, socket, context) {
                     cColor: box.color,
                     cSize: box.size
                 };
-                io.to(String(currentTeamId)).emit('updateTextBox', responseData);
+                socket.to(String(currentTeamId)).emit('updateTextBox', responseData);
             }
         }
 
-        // 이동
         else if (fnc === 'move') {
-            const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
-            if (idx >= 0) {
-                const box = textBoxes[idx];
-                if (cLocate) {
-                    box.x = cLocate.x;
-                    box.y = cLocate.y;
-                }
-                try {
-                    await context.queryPromise(
-                        'UPDATE ProjectInfo SET locate = ? WHERE node = ? AND pId = ? AND tId = ?',
-                        [JSON.stringify({ x: box.x, y: box.y }), node, currentProjectId, currentTeamId]
-                    );
-                } catch (error) {
-                    console.error('텍스트 박스 이동 실패:', error);
-                }
-                const responseData = {
-                    type, fnc, node,
-                    tId: currentTeamId,
-                    pId: currentProjectId,
-                    cLocate: { x: box.x, y: box.y }
-                };
-                io.to(String(currentTeamId)).emit('moveTextBox', responseData);
-            }
-        }
-
-        // 크기 조정
-        else if (fnc === 'resize') {
-            const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
-            if (idx >= 0) {
-                const box = textBoxes[idx];
-                if (cScale) {
-                    box.width = cScale.width;
-                    box.height = cScale.height;
-                }
-                try {
-                    await context.queryPromise(
-                        'UPDATE ProjectInfo SET scale = ? WHERE node = ? AND pId = ? AND tId = ?',
-                        [JSON.stringify({ width: box.width, height: box.height }), node, currentProjectId, currentTeamId]
-                    );
-                } catch (error) {
-                    console.error('텍스트 박스 크기 조정 실패:', error);
-                }
-                const responseData = {
-                    type, fnc, node,
-                    tId: currentTeamId,
-                    pId: currentProjectId,
-                    cScale: { width: box.width, height: box.height }
-                };
-                io.to(String(currentTeamId)).emit('resizeTextBox', responseData);
-            }
-        }
+  const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
+  if (idx >= 0) {
+    const box = textBoxes[idx];
+    // 위치 이동
+    if (cLocate) {
+      box.x = cLocate.x;
+      box.y = cLocate.y;
+    }
+    // 크기 조정
+    if (cScale) {
+      box.width = cScale.width;
+      box.height = cScale.height;
+    }
+    try {
+      // locate와 scale을 한 번에 업데이트
+      await context.queryPromise(
+        'UPDATE ProjectInfo SET locate = ?, scale = ? WHERE node = ? AND pId = ? AND tId = ?',
+        [JSON.stringify({ x: box.x, y: box.y }), JSON.stringify({ width: box.width, height: box.height }), node, currentProjectId, currentTeamId]
+      );
+    } catch (error) {
+      console.error('텍스트 박스 이동/크기조정 실패:', error);
+    }
+    const responseData = {
+      type, fnc, node,
+      tId: currentTeamId,
+      pId: currentProjectId,
+      cLocate: { x: box.x, y: box.y },
+      cScale: { width: box.width, height: box.height }
+    };
+    socket.to(String(currentTeamId)).emit('moveTextBox', responseData);
+  }
+}
 
         // 삭제
         else if (fnc === 'delete') {
@@ -161,7 +141,7 @@ module.exports = function(io, socket, context) {
                     tId: currentTeamId,
                     pId: currentProjectId
                 };
-                io.to(String(currentTeamId)).emit('deleteTextBox', responseData);
+                socket.to(String(currentTeamId)).emit('removeTextBox', responseData);
             }
         }
     });
