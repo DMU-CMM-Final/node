@@ -1,6 +1,6 @@
-const path = require('path');
+//const path = require('path');
 const multer = require('multer');
-const fs = require('fs');
+//const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { queryPromise } = require('./dbConnector');
 

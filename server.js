@@ -103,7 +103,7 @@ async function initializeImages() {
     console.error('이미지 초기화 실패:', error);
   }
 }
-// 이미지 불러오기 API
+// 이미지 불러오기
 app.get('/api/image/:node/:pId/:tId', async (req, res) => {
   const { node, pId, tId } = req.params;
   try {
@@ -126,23 +126,37 @@ initializeTextBoxes()
   .then(() => initializeImages())
   .then(() => {
     io.on('connection', (socket) => {
+
       let currentTeamId = null;
       let currentProjectId = null;
       let currentUserId = null;
+
+      socket.on('signal', ({ id, data }) => {
+            io.to(id).emit('signal', { from: socket.id, data });
+      });
 
       socket.on('joinTeam', async ({ uId, tId, pId }) => {
         currentTeamId = tId;
         currentProjectId = pId;
         currentUserId = uId;
         socket.join(String(currentTeamId));
+
+        //팀,프젝 필터링해서 전송
         const filteredTexts = textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId);
         const filteredVotes = votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId);
         const filteredImages = images.filter(img => img.tId == currentTeamId && img.pId == currentProjectId);
         socket.emit('init', {
           texts: filteredTexts,
           votes: filteredVotes,
-          images: filteredImages
+          images: filteredImages,
+          clients: io.sockets.adapter.rooms.get(String(currentTeamId)) || []
         });
+        
+      });
+      socket.on('mouseMove', (data) => {
+        if (currentTeamId) { // 같은팀에 속해 있을 때만 전송
+          io.to(String(currentTeamId)).emit('mouseMove', { userId: currentUserId, x: data.x, y: data.y });
+        }
       });
 
       textHandlers(io, socket, {
