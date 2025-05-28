@@ -6,7 +6,7 @@ const { queryPromise } = require('./dbConnector');
 
 // 파일 시스템 저장은 필요 없으므로, multer 메모리 스토리지 사용
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
-
+//메모리 스토리지에 임시 저장을하거 db에 저장하는거임
 async function handleImageUpload(req, res, io) {
   if (!req.file) return res.status(400).send('이미지 없음');
   const cLocate = req.body.cLocate ? JSON.parse(req.body.cLocate) : {};

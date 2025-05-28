@@ -67,7 +67,7 @@ module.exports = function(io, socket, context) {
         } catch (error) {
           console.error('투표 업데이트 실패:', error);
         }
-        io.to(String(currentTeamId)).emit('updateVote', {
+        socket.to(String(currentTeamId)).emit('updateVote', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId,
