@@ -7,21 +7,27 @@ const { upload, handleImageUpload, imageHandlers } = require('./image');
 const textHandlers = require('./text');
 const voteHandlers = require('./vote');
 
+const cors = require('cors');
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
+app.use(cors());
 
-// 이미지 업로드 API
-app.post('/api/image/upload', upload.single('image'), (req, res) => {
-  handleImageUpload(req, res, io);
-});
+const userIdToSocketId = {};
+const socketIdToUserId = {};
 
-// 메모리 데이터
 let textBoxes = [];
 let votes = [];
 let images = [];
+
+// 이미지 업로드 API
+app.post('/api/image/upload', upload.single('image'), (req, res) => {
+handleImageUpload(req, res, io, images);
+});
+
+
 
 // 데이터 초기화 함수
 async function initializeTextBoxes() {
@@ -81,7 +87,6 @@ async function initializeVotes() {
     console.error('투표 초기화 실패:', error);
   }
 }
-
 async function initializeImages() {
   try {
     const imageItems = await queryPromise(
@@ -99,10 +104,15 @@ async function initializeImages() {
       width: JSON.parse(img.scale).width,
       height: JSON.parse(img.scale).height
     }));
+    console.log('DB에서 불러온 이미지 정보:', imageItems);
+
+
+    // console.log('이미지 초기화 결과:', images);
   } catch (error) {
     console.error('이미지 초기화 실패:', error);
   }
 }
+
 // 이미지 불러오기
 app.get('/api/image/:node/:pId/:tId', async (req, res) => {
   const { node, pId, tId } = req.params;
@@ -131,6 +141,68 @@ initializeTextBoxes()
       let currentProjectId = null;
       let currentUserId = null;
 
+
+      // 팀(방) 입장
+  socket.on('join-room', ({ teamId, userId }) => {
+    userIdToSocketId[userId] = socket.id;
+    socketIdToUserId[socket.id] = userId;
+    socket.join(teamId);
+    socket.to(teamId).emit('user-joined', { userId, socketId: socket.id });
+    console.log(`User ${userId} joined team ${teamId}`);
+  });
+
+  // offer 전달
+  socket.on('webrtc-offer', ({ teamId, to, from, offer }) => {
+  const targetSocketId = userIdToSocketId[to]; // to는 유저 id
+  if (targetSocketId) {
+    io.to(targetSocketId).emit('webrtc-offer', { from: socketIdToUserId[socket.id], offer });
+  }
+});
+
+  // answer 전달
+  socket.on('webrtc-answer', ({ teamId, to, from, answer }) => {
+  const targetSocketId = userIdToSocketId[to];
+  if (targetSocketId) {
+    io.to(targetSocketId).emit('webrtc-answer', { from: socketIdToUserId[socket.id], answer });
+  }
+});
+
+  // ICE candidate 전달
+  socket.on('webrtc-candidate', ({ teamId, to, from, candidate }) => {
+  const targetSocketId = userIdToSocketId[to];
+  if (targetSocketId) {
+    io.to(targetSocketId).emit('webrtc-candidate', { from: socketIdToUserId[socket.id], candidate });
+  }
+});
+  
+  socket.on('start-call', ({ teamId }) => {
+  // 현재 방에 있는 모든 소켓 id 가져오기
+  const clients = Array.from(io.sockets.adapter.rooms.get(teamId) || []);
+  console.log('클라이언트 : ', clients);
+  // 현재 소켓을 제외한 다른 유저들에게 call-user 이벤트 전송
+  clients.forEach(clientId => {
+    if (clientId !== socket.id) {
+      io.to(clientId).emit('call-user', { from: socket.id });
+    }
+  });
+});
+
+socket.on('disconnect', () => {
+  const userId = socketIdToUserId[socket.id];
+  if (userId) {
+    delete userIdToSocketId[userId];
+    delete socketIdToUserId[socket.id];
+  }
+});
+  // 유저 퇴장 시
+  socket.on('disconnecting', () => {
+    const rooms = Array.from(socket.rooms).filter(r => r !== socket.id);
+    rooms.forEach(teamId => {
+      socket.to(teamId).emit('user-left', { socketId: socket.id });
+    });
+    console.log('User disconnected:', socket.id);
+  });
+
       socket.on('signal', ({ id, data }) => {
             io.to(id).emit('signal', { from: socket.id, data });
       });
@@ -145,11 +217,14 @@ initializeTextBoxes()
         const filteredTexts = textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId);
         const filteredVotes = votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId);
         const filteredImages = images.filter(img => img.tId == currentTeamId && img.pId == currentProjectId);
+        console.log('joinTeam에서 보내는 이미지 데이터:', filteredImages);
+        
         socket.emit('init', {
           texts: filteredTexts,
           votes: filteredVotes,
           images: filteredImages,
           clients: io.sockets.adapter.rooms.get(String(currentTeamId)) || []
+          
         });
         
       });

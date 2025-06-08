@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>실시간 커서/화상회의</title>
+  <style>
+    #canvas { position: relative; width: 800px; height: 600px; border: 1px solid #aaa; background: #f8f8f8; }
+    .cursor { position: absolute; width: 16px; height: 16px; pointer-events: none; }
+    .cursor span { background: #eee; border: 1px solid #333; border-radius: 50%; padding: 2px 4px; font-size: 10px; }
+    .video-box { display: flex; gap: 10px; margin-top: 20px; }
+    .video-box video { background: #222; width: 240px; }
+  </style>
+</head>
+<body>
+  <div>
+    <input id="tId" placeholder="Team ID" value="1" />
+    <input id="uId" placeholder="User ID" value="1" />
+    <button id="joinBtn">입장</button>
+    <button id="startCall" disabled>화상회의 시작</button>
+    <button id="screenShare" disabled>화면 공유</button>
+  </div>
+  <div id="canvas"></div>
+  <div class="video-box" id="videosBox">
+    <div>
+      <b>내 화면</b><br>
+      <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+    <!-- 상대방 비디오들은 JS에서 동적으로 추가됨 -->
+  </div>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>

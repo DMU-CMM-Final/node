@@ -7,7 +7,7 @@ const { queryPromise } = require('./dbConnector');
 // 파일 시스템 저장은 필요 없으므로, multer 메모리 스토리지 사용
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 //메모리 스토리지에 임시 저장을하거 db에 저장하는거임
-async function handleImageUpload(req, res, io) {
+async function handleImageUpload(req, res, io, images) {
   if (!req.file) return res.status(400).send('이미지 없음');
   const cLocate = req.body.cLocate ? JSON.parse(req.body.cLocate) : {};
   const cScale = req.body.cScale ? JSON.parse(req.body.cScale) : {};
@@ -30,6 +30,10 @@ async function handleImageUpload(req, res, io) {
       'INSERT INTO ProjectInfo (node, pId, tId, dType, locate, scale) VALUES (?, ?, ?, ?, ?, ?)',
       [node, pId, tId, 'image', JSON.stringify({ x, y }), JSON.stringify({ width, height })]
     );
+    images.push({
+      node, pId, tId, uId, fileName, mimeType, x, y, width, height
+    });
+
     io.to(String(tId)).emit('addImage', {
       node, pId, tId, uId, fileName, mimeType, cLocate: { x, y }, cScale: { width, height }
     });
@@ -50,6 +54,7 @@ function imageHandlers(io, socket, context) {
 
     const { fnc, node, cLocate, cScale, fileName, type = 'image' } = data;
 
+    // 이동 이벤트
     if (fnc === 'move') {
       try {
         await context.queryPromise(
@@ -62,6 +67,13 @@ function imageHandlers(io, socket, context) {
             currentTeamId
           ]
         );
+        const idx = images.findIndex(img => img.node === node && img.pId == currentProjectId && img.tId == currentTeamId);
+        if (idx !== -1) {
+          images[idx].x = cLocate.x;
+          images[idx].y = cLocate.y;
+          images[idx].width = cScale.width;
+          images[idx].height = cScale.height;
+        }
         socket.to(String(currentTeamId)).emit('moveImage', {
           type, fnc, node,
           tId: currentTeamId,
@@ -73,21 +85,24 @@ function imageHandlers(io, socket, context) {
         console.error('이미지 이동/크기조정 실패:', error);
       }
     }
-    else if (fnc === 'delete') {
+
+    // 삭제 이벤트
+    if (fnc === 'delete') {
       try {
         await context.queryPromise(
           'DELETE FROM Image WHERE node = ? AND pId = ? AND tId = ?',
           [node, currentProjectId, currentTeamId]
         );
         await context.queryPromise(
-          'DELETE FROM ProjectInfo WHERE node = ? AND pId = ? AND tId = ?',
-          [node, currentProjectId, currentTeamId]
+          'DELETE FROM ProjectInfo WHERE node = ? AND pId = ? AND tId = ? AND dType = ?',
+          [node, currentProjectId, currentTeamId, 'image']
         );
-        setImages(images.filter(img => !(img.node === node && img.pId == currentProjectId && img.tId == currentTeamId)));
-        socket.to(String(currentTeamId)).emit('removeImage', {
-          type, fnc, node,
-          tId: currentTeamId,
-          pId: currentProjectId
+        const idx = images.findIndex(img => img.node === node && img.pId == currentProjectId && img.tId == currentTeamId);
+        if (idx !== -1) {
+          images.splice(idx, 1);
+        }
+        io.to(String(currentTeamId)).emit('removeImage', {
+          type, fnc, node, tId: currentTeamId, pId: currentProjectId
         });
       } catch (error) {
         console.error('이미지 삭제 실패:', error);
@@ -95,5 +110,6 @@ function imageHandlers(io, socket, context) {
     }
   });
 }
+
 
 module.exports = { upload, handleImageUpload, imageHandlers };

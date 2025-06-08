@@ -11,14 +11,21 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^5.1.0",
     "multer": "^2.0.0",
     "mysql": "^2.18.1",
     "mysql2": "^3.14.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@types/socket.io-client": "^1.4.36",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   }

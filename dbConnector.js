@@ -8,6 +8,7 @@
 //     port: 3306
 // });
 
+
 // async function queryPromise(query, values) {
 //     try {
 //         const [results] = await db.execute(query, values);
@@ -22,9 +23,9 @@
 const mysql = require('mysql2/promise');
 
 const db = mysql.createPool({
-    host: 'localhost',
-    user: 'root',
-    password: 'hyun',
+    host: '172.31.87.147',
+    user: 'cmm',
+    password: 'cmm4012',
     database: 'cmm',
     port: 3306
 });
@@ -39,3 +40,26 @@ async function queryPromise(query, values) {
 }
 
 module.exports = { db, queryPromise };
+
+
+
+// const mysql = require('mysql2/promise');
+
+// const db = mysql.createPool({
+//     host: 'localhost',
+//     user: 'root',
+//     password: 'hyun',
+//     database: 'cmm',
+//     port: 3306
+// });
+
+// async function queryPromise(query, values) {
+//     try {
+//         const [results] = await db.execute(query, values);
+//         return results;
+//     } catch (error) {
+//         throw error;
+//     }
+// }
+
+// module.exports = { db, queryPromise };
