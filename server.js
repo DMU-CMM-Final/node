@@ -144,63 +144,112 @@ initializeTextBoxes()
 
       // 팀(방) 입장
   socket.on('join-room', ({ teamId, userId }) => {
+    console.log(`User ${userId} joining room ${teamId}`);
+    
     userIdToSocketId[userId] = socket.id;
     socketIdToUserId[socket.id] = userId;
     socket.join(teamId);
+    
+    // 현재 사용자 정보도 업데이트
+    if (!currentUserId) currentUserId = userId;
+    if (!currentTeamId) currentTeamId = teamId;
+    
     socket.to(teamId).emit('user-joined', { userId, socketId: socket.id });
-    console.log(`User ${userId} joined team ${teamId}`);
+    console.log(`User ${userId} joined team ${teamId}, socket: ${socket.id}`);
   });
 
   // offer 전달
   socket.on('webrtc-offer', ({ teamId, to, from, offer }) => {
-  const targetSocketId = userIdToSocketId[to]; // to는 유저 id
-  if (targetSocketId) {
-    io.to(targetSocketId).emit('webrtc-offer', { from: socketIdToUserId[socket.id], offer });
-  }
-});
+    console.log(`Offer from ${from} to ${to}`);
+    const targetSocketId = userIdToSocketId[to];
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-offer', { 
+        from: from, 
+        offer: offer 
+      });
+      console.log(`Offer forwarded to ${to} (${targetSocketId})`);
+    } else {
+      console.log(`Target user ${to} not found`);
+    }
+  });
 
   // answer 전달
   socket.on('webrtc-answer', ({ teamId, to, from, answer }) => {
-  const targetSocketId = userIdToSocketId[to];
-  if (targetSocketId) {
-    io.to(targetSocketId).emit('webrtc-answer', { from: socketIdToUserId[socket.id], answer });
-  }
-});
+    console.log(`Answer from ${from} to ${to}`);
+    const targetSocketId = userIdToSocketId[to];
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-answer', { 
+        from: from, 
+        answer: answer 
+      });
+      console.log(`Answer forwarded to ${to} (${targetSocketId})`);
+    } else {
+      console.log(`Target user ${to} not found`);
+    }
+  });
 
   // ICE candidate 전달
   socket.on('webrtc-candidate', ({ teamId, to, from, candidate }) => {
-  const targetSocketId = userIdToSocketId[to];
-  if (targetSocketId) {
-    io.to(targetSocketId).emit('webrtc-candidate', { from: socketIdToUserId[socket.id], candidate });
-  }
-});
-  
-  socket.on('start-call', ({ teamId }) => {
-  // 현재 방에 있는 모든 소켓 id 가져오기
-  const clients = Array.from(io.sockets.adapter.rooms.get(teamId) || []);
-  console.log('클라이언트 : ', clients);
-  // 현재 소켓을 제외한 다른 유저들에게 call-user 이벤트 전송
-  clients.forEach(clientId => {
-    if (clientId !== socket.id) {
-      io.to(clientId).emit('call-user', { from: socket.id });
+    console.log(`ICE candidate from ${from} to ${to}`);
+    const targetSocketId = userIdToSocketId[to];
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-candidate', { 
+        from: from, 
+        candidate: candidate 
+      });
+      console.log(`ICE candidate forwarded to ${to} (${targetSocketId})`);
+    } else {
+      console.log(`Target user ${to} not found`);
     }
   });
-});
+  
+  socket.on('start-call', ({ teamId }) => {
+    console.log(`Start call in team ${teamId} by ${socketIdToUserId[socket.id]}`);
+    
+    const room = io.sockets.adapter.rooms.get(teamId);
+    if (!room) {
+      console.log(`Room ${teamId} not found`);
+      return;
+    }
+    
+    const clients = Array.from(room);
+    console.log(`Clients in room ${teamId}:`, clients);
+    
+    clients.forEach(clientId => {
+      if (clientId !== socket.id) {
+        const targetUserId = socketIdToUserId[clientId];
+        console.log(`Sending call-user to ${targetUserId} (${clientId})`);
+        io.to(clientId).emit('call-user', { 
+          from: socketIdToUserId[socket.id]
+        });
+      }
+    });
+  });
 
-socket.on('disconnect', () => {
-  const userId = socketIdToUserId[socket.id];
-  if (userId) {
-    delete userIdToSocketId[userId];
-    delete socketIdToUserId[socket.id];
-  }
-});
+  socket.on('disconnect', () => {
+    const userId = socketIdToUserId[socket.id];
+    console.log(`User ${userId} disconnected (${socket.id})`);
+    
+    if (userId) {
+      delete userIdToSocketId[userId];
+      delete socketIdToUserId[socket.id];
+    }
+    
+    if (currentTeamId) {
+      socket.leave(String(currentTeamId));
+    }
+  });
   // 유저 퇴장 시
   socket.on('disconnecting', () => {
     const rooms = Array.from(socket.rooms).filter(r => r !== socket.id);
+    const userId = socketIdToUserId[socket.id];
+    
     rooms.forEach(teamId => {
-      socket.to(teamId).emit('user-left', { socketId: socket.id });
+      socket.to(teamId).emit('user-left', { 
+        socketId: socket.id, 
+        userId: userId 
+      });
     });
-    console.log('User disconnected:', socket.id);
   });
 
       socket.on('signal', ({ id, data }) => {
@@ -211,23 +260,25 @@ socket.on('disconnect', () => {
         currentTeamId = tId;
         currentProjectId = pId;
         currentUserId = uId;
+        
+        // 사용자 매핑 추가
+        userIdToSocketId[uId] = socket.id;
+        socketIdToUserId[socket.id] = uId;
+        
         socket.join(String(currentTeamId));
 
-        //팀,프젝 필터링해서 전송
         const filteredTexts = textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId);
         const filteredVotes = votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId);
         const filteredImages = images.filter(img => img.tId == currentTeamId && img.pId == currentProjectId);
-        console.log('joinTeam에서 보내는 이미지 데이터:', filteredImages);
         
         socket.emit('init', {
           texts: filteredTexts,
           votes: filteredVotes,
           images: filteredImages,
           clients: io.sockets.adapter.rooms.get(String(currentTeamId)) || []
-          
         });
-        
       });
+
       socket.on('mouseMove', (data) => {
         if (currentTeamId) { // 같은팀에 속해 있을 때만 전송
           io.to(String(currentTeamId)).emit('mouseMove', { userId: currentUserId, x: data.x, y: data.y });
