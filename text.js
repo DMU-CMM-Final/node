@@ -1,4 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
+const insertLog = require('./logger');
+
 
 module.exports = function(io, socket, context) {
     socket.on('textEvent', async (data) => {
@@ -39,6 +41,14 @@ module.exports = function(io, socket, context) {
                     'INSERT INTO ProjectInfo (node, pId, tId, dType, locate, scale) VALUES (?, ?, ?, ?, ?, ?)',
                     [newNode, currentProjectId, currentTeamId, 'text', JSON.stringify({ x, y }), JSON.stringify({ width, height })]
                 );
+                //로그찍깅
+                await insertLog({
+                    node: newNode,
+                    pId: currentProjectId,
+                    tId: currentTeamId,
+                    uId: currentUserId,
+                    action: 'text-new'
+                }, context.queryPromise);
             } catch (error) {
                 console.error('새 텍스트 박스 저장 실패:', error);
             }
@@ -51,6 +61,8 @@ module.exports = function(io, socket, context) {
                 cFont: box.font, cColor: box.color, cSize: box.size,
                 cContent: box.text
             };
+            
+
             io.to(String(currentTeamId)).emit('addTextBox', responseData);
         }
 
@@ -68,6 +80,14 @@ module.exports = function(io, socket, context) {
                         'UPDATE Text SET content = ?, font = ?, color = ?, fontSize = ? WHERE node = ? AND pId = ? AND tId = ?',
                         [box.text, box.font, box.color, box.size, node, currentProjectId, currentTeamId]
                     );
+                    
+                    await insertLog({
+                        node,
+                        pId: currentProjectId,
+                        tId: currentTeamId,
+                        uId: context.getCurrentUserId(),
+                        action: 'text-update'
+                    }, context.queryPromise);
                 } catch (error) {
                     console.error('텍스트 박스 업데이트 실패:', error);
                 }
@@ -80,43 +100,56 @@ module.exports = function(io, socket, context) {
                     cColor: box.color,
                     cSize: box.size
                 };
+
+                
                 socket.to(String(currentTeamId)).emit('updateTextBox', responseData);
             }
         }
 
         else if (fnc === 'move') {
-  const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
-  if (idx >= 0) {
-    const box = textBoxes[idx];
-    // 위치 이동
-    if (cLocate) {
-      box.x = cLocate.x;
-      box.y = cLocate.y;
-    }
-    // 크기 조정
-    if (cScale) {
-      box.width = cScale.width;
-      box.height = cScale.height;
-    }
-    try {
-      // locate와 scale을 한 번에 업데이트
-      await context.queryPromise(
-        'UPDATE ProjectInfo SET locate = ?, scale = ? WHERE node = ? AND pId = ? AND tId = ?',
-        [JSON.stringify({ x: box.x, y: box.y }), JSON.stringify({ width: box.width, height: box.height }), node, currentProjectId, currentTeamId]
-      );
-    } catch (error) {
-      console.error('텍스트 박스 이동/크기조정 실패:', error);
-    }
-    const responseData = {
-      type, fnc, node,
-      tId: currentTeamId,
-      pId: currentProjectId,
-      cLocate: { x: box.x, y: box.y },
-      cScale: { width: box.width, height: box.height }
-    };
-    socket.to(String(currentTeamId)).emit('moveTextBox', responseData);
-  }
-}
+            const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
+            
+            if (idx >= 0) {
+                const box = textBoxes[idx];
+                // 위치 이동
+                if (cLocate) {
+                box.x = cLocate.x;
+                box.y = cLocate.y;
+                }
+                // 크기 조정
+                if (cScale) {
+                box.width = cScale.width;
+                box.height = cScale.height;
+                }
+                try {
+                // locate와 scale을 한 번에 업데이트
+                await context.queryPromise(
+                    'UPDATE ProjectInfo SET locate = ?, scale = ? WHERE node = ? AND pId = ? AND tId = ?',
+                    [JSON.stringify({ x: box.x, y: box.y }), JSON.stringify({ width: box.width, height: box.height }), node, currentProjectId, currentTeamId]
+                );
+                
+                await insertLog({
+                    node,
+                    pId: currentProjectId,
+                    tId: currentTeamId,
+                    uId: currentUserId,
+                    action: 'text-move' // 또는 'move-start', 'move-end' 등 프론트에서 구분 가능
+                }, context.queryPromise);
+            } catch (error) {
+                console.error('텍스트 박스 이동/크기조정 실패:', error);
+            }
+                const responseData = {
+                    type, fnc, node,
+                    tId: currentTeamId,
+                    pId: currentProjectId,
+                    cLocate: { x: box.x, y: box.y },
+                    cScale: { width: box.width, height: box.height }
+                };
+                
+
+                socket.to(String(currentTeamId)).emit('moveTextBox', responseData);
+                }
+            }
 
         // 삭제
         else if (fnc === 'delete') {
@@ -133,6 +166,14 @@ module.exports = function(io, socket, context) {
                         'DELETE FROM ProjectInfo WHERE node = ? AND pId = ? AND tId = ?',
                         [node, currentProjectId, currentTeamId]
                     );
+                    
+                    await insertLog({
+                        node,
+                        pId: currentProjectId,
+                        tId: currentTeamId,
+                        uId: currentUserId,
+                        action: 'text-del'
+                    }, context.queryPromise);
                 } catch (error) {
                     console.error('텍스트 박스 삭제 실패:', error);
                 }
@@ -141,6 +182,8 @@ module.exports = function(io, socket, context) {
                     tId: currentTeamId,
                     pId: currentProjectId
                 };
+
+                
                 socket.to(String(currentTeamId)).emit('removeTextBox', responseData);
             }
         }

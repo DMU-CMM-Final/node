@@ -1,4 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
+const insertLog = require('./logger');
+
 
 module.exports = function(io, socket, context) {
   socket.on('voteEvent', async (data) => {
@@ -37,9 +39,19 @@ module.exports = function(io, socket, context) {
           'INSERT INTO ProjectInfo (node, pId, tId, dType, locate, scale) VALUES (?, ?, ?, ?, ?, ?)',
           [newNode, currentProjectId, currentTeamId, 'vote', JSON.stringify({ x, y }), JSON.stringify({ width, height })]
         );
+        await insertLog({
+            node: newNode,
+            pId: currentProjectId,
+            tId: currentTeamId,
+            uId: context.getCurrentUserId(),
+            action: 'vote-new'
+        }, context.queryPromise);
       } catch (error) {
         console.error('새 투표 저장 실패:', error);
       }
+      
+
+
       votes.push(vote);
       context.setVotes(votes);
       io.to(String(currentTeamId)).emit('addVote', {
@@ -64,9 +76,18 @@ module.exports = function(io, socket, context) {
             'UPDATE Vote SET title = ?, list1 = ?, list2 = ?, list3 = ?, list4 = ? WHERE node = ? AND pId = ? AND tId = ?',
             [vote.title, vote.list?.[0]?.content || '', vote.list?.[1]?.content || '', vote.list?.[2]?.content || '', vote.list?.[3]?.content || '', node, currentProjectId, currentTeamId]
           );
+          
+          await insertLog({
+              node,
+              pId: currentProjectId,
+              tId: currentTeamId,
+              uId: context.getCurrentUserId(),
+              action: 'vote-update'
+          },context.queryPromise);
         } catch (error) {
           console.error('투표 업데이트 실패:', error);
         }
+
         socket.to(String(currentTeamId)).emit('updateVote', {
           type, fnc, node,
           tId: currentTeamId,
@@ -100,6 +121,15 @@ module.exports = function(io, socket, context) {
             [JSON.stringify({ width: vote.width, height: vote.height }), node, currentProjectId, currentTeamId]
           );
         }
+        await insertLog({
+            node,
+            pId: currentProjectId,
+            tId: currentTeamId,
+            uId: context.getCurrentUserId(),
+            action: 'vote-move'
+        }, context.queryPromise);
+
+
         socket.to(String(currentTeamId)).emit('moveVote', {
           type, fnc, node,
           tId: currentTeamId,
@@ -117,17 +147,35 @@ module.exports = function(io, socket, context) {
         votes.splice(idx, 1);
         context.setVotes(votes);
         try {
+          // 1. 연결된 VoteUser 데이터 먼저 삭제
+          await context.queryPromise(
+            'DELETE FROM VoteUser WHERE node = ? AND pId = ? AND tId = ?',
+            [node, currentProjectId, currentTeamId]
+          );
+          // 2. Vote 데이터 삭제
           await context.queryPromise(
             'DELETE FROM Vote WHERE node = ? AND pId = ? AND tId = ?',
             [node, currentProjectId, currentTeamId]
           );
+          // 3. ProjectInfo 데이터 삭제
           await context.queryPromise(
             'DELETE FROM ProjectInfo WHERE node = ? AND pId = ? AND tId = ?',
             [node, currentProjectId, currentTeamId]
           );
+          
+          await insertLog({
+              node,
+              pId: currentProjectId,
+              tId: currentTeamId,
+              uId: context.getCurrentUserId(),
+              action: 'vote-del'
+          }, context.queryPromise);
         } catch (error) {
           console.error('투표 삭제 실패:', error);
         }
+
+        
+
         socket.to(String(currentTeamId)).emit('removeVote', {
           type, fnc, node,
           tId: currentTeamId,
@@ -135,6 +183,7 @@ module.exports = function(io, socket, context) {
         });
       }
     }
+
 
     // 투표(선택/취소)
     else if (fnc === 'choice') {
@@ -165,6 +214,16 @@ module.exports = function(io, socket, context) {
           'UPDATE Vote SET list1Num = ?, list2Num = ?, list3Num = ?, list4Num = ? WHERE node = ? AND pId = ? AND tId = ?',
           [vote.count[0], vote.count[1], vote.count[2], vote.count[3], node, currentProjectId, currentTeamId]
         );
+
+        await insertLog({
+            node,
+            pId: currentProjectId,
+            tId: currentTeamId,
+            uId: context.getCurrentUserId(),
+            action: 'vote-choice'
+        }, context.queryPromise);
+
+
         io.to(String(currentTeamId)).emit('choiceVote', {
           type, fnc, node,
           tId: currentTeamId,

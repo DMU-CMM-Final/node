@@ -4,6 +4,9 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { queryPromise } = require('./dbConnector');
 
+const insertLog = require('./logger');
+
+
 // 파일 시스템 저장은 필요 없으므로, multer 메모리 스토리지 사용
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 //메모리 스토리지에 임시 저장을하거 db에 저장하는거임
@@ -34,14 +37,26 @@ async function handleImageUpload(req, res, io, images) {
       node, pId, tId, uId, fileName, mimeType, x, y, width, height
     });
 
+    
+
     io.to(String(tId)).emit('addImage', {
       node, pId, tId, uId, fileName, mimeType, cLocate: { x, y }, cScale: { width, height }
     });
     res.json({ success: true, node, mimeType, cLocate: { x, y }, cScale: { width, height } });
+    
+    await insertLog({
+        node,
+        pId,
+        tId,
+        uId,
+        action: 'image-new'
+    }, queryPromise);
+    
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'DB 저장 실패' });
   }
+  
 }
 
 function imageHandlers(io, socket, context) {
@@ -74,6 +89,7 @@ function imageHandlers(io, socket, context) {
           images[idx].width = cScale.width;
           images[idx].height = cScale.height;
         }
+
         socket.to(String(currentTeamId)).emit('moveImage', {
           type, fnc, node,
           tId: currentTeamId,
@@ -81,9 +97,19 @@ function imageHandlers(io, socket, context) {
           cLocate,
           cScale
         });
+        
+        await insertLog({
+            node,
+            pId: currentProjectId,
+            tId: currentTeamId,
+            uId: context.getCurrentUserId(),
+            action: 'image-move'
+        }, context.queryPromise);
+
       } catch (error) {
         console.error('이미지 이동/크기조정 실패:', error);
       }
+      
     }
 
     // 삭제 이벤트
@@ -101,12 +127,24 @@ function imageHandlers(io, socket, context) {
         if (idx !== -1) {
           images.splice(idx, 1);
         }
+
+        
+
         io.to(String(currentTeamId)).emit('removeImage', {
           type, fnc, node, tId: currentTeamId, pId: currentProjectId
         });
+        
+        await insertLog({
+            node,
+            pId: currentProjectId,
+            tId: currentTeamId,
+            uId: context.getCurrentUserId(),
+            action: 'image-del'
+        }, context.queryPromise);
       } catch (error) {
         console.error('이미지 삭제 실패:', error);
       }
+      
     }
   });
 }
