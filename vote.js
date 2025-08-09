@@ -41,7 +41,6 @@ module.exports = function(io, socket, context) {
         );
         await insertLog({
             node: newNode,
-            pId: currentProjectId,
             tId: currentTeamId,
             uId: context.getCurrentUserId(),
             action: 'vote-new'
@@ -79,7 +78,6 @@ module.exports = function(io, socket, context) {
           
           await insertLog({
               node,
-              pId: currentProjectId,
               tId: currentTeamId,
               uId: context.getCurrentUserId(),
               action: 'vote-update'
@@ -123,7 +121,6 @@ module.exports = function(io, socket, context) {
         }
         await insertLog({
             node,
-            pId: currentProjectId,
             tId: currentTeamId,
             uId: context.getCurrentUserId(),
             action: 'vote-move'
@@ -165,10 +162,9 @@ module.exports = function(io, socket, context) {
           
           await insertLog({
               node,
-              pId: currentProjectId,
               tId: currentTeamId,
               uId: context.getCurrentUserId(),
-              action: 'vote-del'
+              action: 'vote-del' 
           }, context.queryPromise);
         } catch (error) {
           console.error('투표 삭제 실패:', error);
@@ -217,7 +213,6 @@ module.exports = function(io, socket, context) {
 
         await insertLog({
             node,
-            pId: currentProjectId,
             tId: currentTeamId,
             uId: context.getCurrentUserId(),
             action: 'vote-choice'

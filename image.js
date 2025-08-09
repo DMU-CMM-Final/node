@@ -46,7 +46,6 @@ async function handleImageUpload(req, res, io, images) {
     
     await insertLog({
         node,
-        pId,
         tId,
         uId,
         action: 'image-new'
@@ -100,7 +99,6 @@ function imageHandlers(io, socket, context) {
         
         await insertLog({
             node,
-            pId: currentProjectId,
             tId: currentTeamId,
             uId: context.getCurrentUserId(),
             action: 'image-move'
@@ -136,7 +134,6 @@ function imageHandlers(io, socket, context) {
         
         await insertLog({
             node,
-            pId: currentProjectId,
             tId: currentTeamId,
             uId: context.getCurrentUserId(),
             action: 'image-del'

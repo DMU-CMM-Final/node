@@ -12,7 +12,8 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
-  path: '/node/socket.io'
+  //path: '/node/socket.io'
+  
 });
 
 app.use(cors());
@@ -41,6 +42,10 @@ app.get('/node/api/image/:node/:pId/:tId', async (req, res) => {
 // { teamId: [ { userId, socketId }, ... ] }
 let teams = {};
 
+// DB 데이터 메모리 로드 (기존 로직)
+let textBoxes = [];
+let votes = [];
+let images = [];
 
 // 데이터 초기화 함수
 async function initializeTextBoxes() {
@@ -126,10 +131,7 @@ async function initializeImages() {
   }
 }
 
-// DB 데이터 메모리 로드 (기존 로직)
-let textBoxes = [];
-let votes = [];
-let images = [];
+
 
 async function initializeData() {
     // ... 기존 initializeTextBoxes, initializeVotes, initializeImages 함수 내용 ...
@@ -146,101 +148,118 @@ initializeData().then(() => {
         let currentTeamId = null;
         
 
-        // ✅ [수정] 클라이언트가 방에 들어올 때의 핵심 로직
-        socket.on('join-room', ({ tId: teamId, uId: userId }) => {
-            if (!teamId || !userId) return;
+        // ✅ [수정] 방 입장 로직을 'join-room'으로 통일하고 안정화
+    socket.on('join-room', async ({ tId: teamId, uId: userId }) => {
+        if (!teamId || !userId) return;
 
-            currentTeamId = teamId;
-            currentUserId = userId;
-            socket.join(teamId);
+        currentTeamId = teamId;
+        currentUserId = userId;
+        socket.join(teamId);
 
-            if (!teams[teamId]) {
-                teams[teamId] = [];
-            }
+        if (!teams[teamId]) {
+            teams[teamId] = { users: [] };
+        }
+        
+        const otherUsers = teams[teamId].users.map(user => user.userId);
+        socket.emit('existing-users', { users: otherUsers });
+        
+        const userIndex = teams[teamId].users.findIndex(user => user.userId === userId);
+        if (userIndex > -1) {
+            teams[teamId].users[userIndex].socketId = socket.id;
+        } else {
+            teams[teamId].users.push({ userId, socketId: socket.id });
+        }
+        
+        socket.to(teamId).emit('user-joined', { userId });
 
-            // 기존 사용자 목록을 새로 들어온 사용자에게만 전송
-            const otherUsers = teams[teamId].map(user => user.userId);
-            socket.emit('existing-users', { users: otherUsers });
+        try {
+          await insertLog({
+            node: '',      
+            tId: currentTeamId,
+            uId: currentUserId,
+            action: 'join-team'
+          }, queryPromise);
+        } catch (error) {
+          console.error('로그 저장 실패:', error);
+        }
 
-            // 기존 사용자들에게는 새 사용자의 합류를 알림
-            socket.to(teamId).emit('user-joined', { userId });
-            
-            // 현재 사용자 정보를 팀 목록에 추가 (중복 방지 및 socketId 업데이트)
-            const userIndex = teams[teamId].findIndex(user => user.userId === userId);
-            if (userIndex > -1) {
-                teams[teamId][userIndex].socketId = socket.id;
-            } else {
-                teams[teamId].push({ userId, socketId: socket.id });
-            }
-
-            console.log(`User ${userId} (${socket.id}) joined team ${teamId}. Current members:`, teams[teamId].map(u => u.userId));
-
-            // init 이벤트 전송 (기존 로직과 동일)
-            const filteredTexts = textBoxes.filter(t => t.tId == teamId);
-            const filteredVotes = votes.filter(v => v.tId == teamId);
-            const filteredImages = images.filter(img => img.tId == teamId);
-            socket.emit('init', {
-                texts: filteredTexts,
-                votes: filteredVotes,
-                images: filteredImages,
-            });
+        // 초기 객체 데이터 전송
+        const filteredTexts = textBoxes.filter(t => t.tId == teamId);
+        const filteredVotes = votes.filter(v => v.tId == teamId);
+        const filteredImages = images.filter(img => img.tId == teamId);
+        socket.emit('init', {
+            texts: filteredTexts,
+            votes: filteredVotes,
+            images: filteredImages,
         });
         
-        // ✅ [수정] WebRTC 시그널링 중계 로직
-        const handleSignaling = (eventName) => {
-            socket.on(eventName, (payload) => {
-                const { to: toUserId, teamId } = payload;
-                if (!teams[teamId]) return;
+        console.log(`사용자 ${userId}가 팀 ${teamId}에 참여했습니다.`);
+    });
 
-                const toUser = teams[teamId].find(user => user.userId === toUserId);
-                if (toUser) {
-                    // 특정 사용자에게만 이벤트 전송
-                    io.to(toUser.socketId).emit(eventName, payload);
-                } else {
-                    console.log(`Signaling error: User ${toUserId} not found in team ${teamId}`);
-                }
-            });
-        };
-        
-        handleSignaling('webrtc-offer');
-        handleSignaling('webrtc-answer');
-        handleSignaling('webrtc-candidate');
+    // ✅ [수정] WebRTC 시그널링 중계 로직 (안정화)
+    const handleSignaling = (eventName) => {
+    socket.on(eventName, async (payload) => {
+        if (!payload.teamId || !teams[payload.teamId]) return;
+        const toUser = teams[payload.teamId].users.find(user => user.userId === payload.to);
 
-        // ✅ [수정] 접속 종료 로직
+        // 로그 기록 추가
+        try {
+            await insertLog({
+                node: '', // WebRTC 연결 시 고유 노드가 없을 수 있어 빈값 사용
+                tId: payload.teamId,
+                uId: payload.from, // 발신자 ID
+                action: eventName, // 이벤트명 그대로 기록 (ex: 'webrtc-offer')
+            }, queryPromise);
+        } catch (err) {
+            console.error('WebRTC 로그 저장 실패:', err);
+        }
+
+        if (toUser) {
+            io.to(toUser.socketId).emit(eventName, payload);
+        }
+    });
+};
+
+    handleSignaling('webrtc-offer');
+    handleSignaling('webrtc-answer');
+    handleSignaling('webrtc-candidate');
+
+    // ✅ [수정] context를 통해 핸들러 모듈 호출 (안정화)
+    const context = {
+        getCurrentTeamId: () => currentTeamId,
+        getCurrentProjectId: () => "1", // 임시 pId
+        getCurrentUserId: () => currentUserId,
+        textBoxesRef: () => textBoxes,
+        setTextBoxes: (newBoxes) => { textBoxes = newBoxes; },
+        votesRef: () => votes,
+        setVotes: (newVotes) => { votes = newVotes; },
+        imagesRef: () => images,
+        setImages: (newImages) => { images = newImages; },
+        queryPromise,
+        teams
+    };
+    textHandlers(io, socket, context);
+    voteHandlers(io, socket, context);
+    imageHandlers(io, socket, context);
+
+
+     // ✅ [수정] 접속 종료 로직
         socket.on('disconnect', () => {
             console.log(`User disconnected: ${socket.id}`);
             if (currentTeamId && currentUserId) {
                 // 팀에서 사용자 제거
                 if (teams[currentTeamId]) {
-                    teams[currentTeamId] = teams[currentTeamId].filter(user => user.userId !== currentUserId);
-                    if (teams[currentTeamId].length === 0) {
+                    teams[currentTeamId].users = teams[currentTeamId].users.filter(user => user.userId !== currentUserId);
+                    if (teams[currentTeamId].users.length === 0) {
                         delete teams[currentTeamId];
                     }
                 }
+
                 // 다른 사용자들에게 퇴장 알림
                 socket.to(currentTeamId).emit('user-left', { userId: currentUserId });
                 console.log(`User ${currentUserId} left team ${currentTeamId}`);
             }
         });
-
-        // ❌ [삭제] 기존의 joinTeam, start-call, 복잡한 disconnect 이벤트들은 위 로직으로 통합/대체되었으므로 제거합니다.
-
-        // --- 기존 객체 핸들러들은 그대로 유지 ---
-        const context = {
-            getCurrentTeamId: () => currentTeamId,
-            getCurrentProjectId: () => "1", // 임시 pId
-            getCurrentUserId: () => currentUserId,
-            textBoxesRef: () => textBoxes,
-            setTextBoxes: (boxes) => { textBoxes = boxes; },
-            votesRef: () => votes,
-            setVotes: (v) => { votes = v; },
-            imagesRef: () => images,
-            setImages: (imgs) => { images = imgs; },
-            queryPromise
-        };
-        textHandlers(io, socket, context);
-        voteHandlers(io, socket, context);
-        imageHandlers(io, socket, context);
 
     });
 });

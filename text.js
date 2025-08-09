@@ -44,7 +44,6 @@ module.exports = function(io, socket, context) {
                 //로그찍깅
                 await insertLog({
                     node: newNode,
-                    pId: currentProjectId,
                     tId: currentTeamId,
                     uId: currentUserId,
                     action: 'text-new'
@@ -68,6 +67,11 @@ module.exports = function(io, socket, context) {
 
         // 수정
         else if (fnc === 'update') {
+
+            console.log('[textHandlers] <수신> 텍스트 수정 요청:', {
+                node, tId: currentTeamId, pId: currentProjectId,
+                cContent, cFont, cColor, cSize, from: currentUserId
+            });
             const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
             if (idx >= 0) {
                 const box = textBoxes[idx];
@@ -83,7 +87,6 @@ module.exports = function(io, socket, context) {
                     
                     await insertLog({
                         node,
-                        pId: currentProjectId,
                         tId: currentTeamId,
                         uId: context.getCurrentUserId(),
                         action: 'text-update'
@@ -100,9 +103,21 @@ module.exports = function(io, socket, context) {
                     cColor: box.color,
                     cSize: box.size
                 };
+                // 브로드캐스트 대상 팀원 소켓 ID 및 유저 ID 출력
+                const targetUsers = (context.teams && context.teams[currentTeamId]?.users)
+                    ? context.teams[currentTeamId].users
+                    : []; // 또는 teams 객체 접근 시키세요
 
+                // 본인 소켓 제외, 타인에게만 브로드캐스트
+                const broadcastTargets = targetUsers.filter(user => user.socketId !== socket.id);
+                console.log(`[textHandlers] 팀 ${currentTeamId}로 브로드캐스트 대상:` +
+                    broadcastTargets.map(user => `userId=${user.userId}, socketId=${user.socketId}`).join(', ')
+                );
                 
                 socket.to(String(currentTeamId)).emit('updateTextBox', responseData);
+                console.log('[textHandlers] <송신> 텍스트 수정 브로드캐스트:', {
+                    to: String(currentTeamId), payload: responseData
+                });
             }
         }
 
@@ -130,7 +145,6 @@ module.exports = function(io, socket, context) {
                 
                 await insertLog({
                     node,
-                    pId: currentProjectId,
                     tId: currentTeamId,
                     uId: currentUserId,
                     action: 'text-move' // 또는 'move-start', 'move-end' 등 프론트에서 구분 가능
@@ -169,7 +183,6 @@ module.exports = function(io, socket, context) {
                     
                     await insertLog({
                         node,
-                        pId: currentProjectId,
                         tId: currentTeamId,
                         uId: currentUserId,
                         action: 'text-del'
