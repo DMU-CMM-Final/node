@@ -18,6 +18,12 @@ const io = socketIo(server, {
 
 app.use(cors());
 
+//.env파일 읽기
+require('dotenv').config();
+
+const { summarizeMeeting } = require('./aiService');
+
+
 // --- 기존 코드 유지 ---
 const insertLog = require('./logger');
 app.post('/node/api/image/upload', upload.single('image'), (req, res) => {
@@ -146,55 +152,184 @@ initializeData().then(() => {
         console.log(`User connected: ${socket.id}`);
         let currentUserId = null;
         let currentTeamId = null;
+        let currentProjectId = null;
         
 
-        // ✅ [수정] 방 입장 로직을 'join-room'으로 통일하고 안정화
-    socket.on('join-room', async ({ tId: teamId, uId: userId }) => {
-        if (!teamId || !userId) return;
-
-        currentTeamId = teamId;
-        currentUserId = userId;
-        socket.join(teamId);
-
-        if (!teams[teamId]) {
-            teams[teamId] = { users: [] };
-        }
         
-        const otherUsers = teams[teamId].users.map(user => user.userId);
-        socket.emit('existing-users', { users: otherUsers });
-        
-        const userIndex = teams[teamId].users.findIndex(user => user.userId === userId);
-        if (userIndex > -1) {
-            teams[teamId].users[userIndex].socketId = socket.id;
-        } else {
-            teams[teamId].users.push({ userId, socketId: socket.id });
-        }
-        
-        socket.to(teamId).emit('user-joined', { userId });
+        socket.on('join-room', async ({ tId: teamId, uId: userId }) => {
+            if (!teamId || !userId) return;
 
-        try {
-          await insertLog({
-            node: '',      
-            tId: currentTeamId,
-            uId: currentUserId,
-            action: 'join-team'
-          }, queryPromise);
-        } catch (error) {
-          console.error('로그 저장 실패:', error);
-        }
+            currentTeamId = teamId;
+            currentUserId = userId;
+            socket.join(teamId);
 
-        // 초기 객체 데이터 전송
-        const filteredTexts = textBoxes.filter(t => t.tId == teamId);
-        const filteredVotes = votes.filter(v => v.tId == teamId);
-        const filteredImages = images.filter(img => img.tId == teamId);
-        socket.emit('init', {
-            texts: filteredTexts,
-            votes: filteredVotes,
-            images: filteredImages,
+            if (!teams[teamId]) {
+                teams[teamId] = { users: [] };
+            }
+            
+            const otherUsers = teams[teamId].users.map(user => user.userId);
+            socket.emit('existing-users', { users: otherUsers });
+            
+            const userIndex = teams[teamId].users.findIndex(user => user.userId === userId);
+            if (userIndex > -1) {
+                teams[teamId].users[userIndex].socketId = socket.id;
+            } else {
+                teams[teamId].users.push({ userId, socketId: socket.id });
+            }
+            
+            socket.to(teamId).emit('user-joined', { userId });
+
+            let currentUsers = [];
+
+            try {
+                const projects = await queryPromise(
+                    'SELECT pId, pName, createDate FROM TeamProject WHERE tId = ?',
+                    [teamId]
+                );
+
+                // 현재 접속한 유저 목록
+                currentUsers = teams[teamId].users.map(u => u.userId);
+
+                socket.emit('room-info', {
+                    users: currentUsers,
+                    projects
+                });
+            } catch (err) {
+                console.error('프로젝트 목록 불러오기 실패:', err);
+            }
+
+            try {
+              await insertLog({
+                node: '',      
+                tId: currentTeamId,
+                uId: currentUserId,
+                action: 'join-team'
+              }, queryPromise);
+            } catch (error) {
+              console.error('로그 저장 실패:', error);
+            }
+
+            //현재 방 유저 목록 로그 출력
+            console.log(`[JOIN-ROOM] '${userId}' 님이 팀 ${teamId}에 접속`);
+            console.log(`[TEAM ${teamId} 현재 인원]`, currentUsers);
+
+            // 초기 객체 데이터 전송
+            // const filteredTexts = textBoxes.filter(t => t.tId == teamId);
+            // const filteredVotes = votes.filter(v => v.tId == teamId);
+            // const filteredImages = images.filter(img => img.tId == teamId);
+            // socket.emit('init', {
+            //     texts: filteredTexts,
+            //     votes: filteredVotes,
+            //     images: filteredImages,
+            // });
+            
+            console.log(`사용자 ${userId}가 팀 ${teamId}에 참여했습니다.`);
         });
+
+        socket.on('join-project', async ({ pId }) => {
+          if (!currentTeamId || !pId) {
+            socket.emit('error', { message: '팀 또는 프로젝트 ID가 없습니다.' });
+            return;
+          }
+
+          currentProjectId = pId;
+
+          //프로젝트 데이터 필터링
+          const filteredTexts = textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId);
+          const filteredVotes = votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId);
+          const filteredImages = images.filter(img => img.tId == currentTeamId && img.pId == currentProjectId);
+
+          socket.emit('project-init', { 
+            pId: currentProjectId, 
+            texts: filteredTexts, 
+            votes: filteredVotes, 
+            images: filteredImages 
+          });
+          console.log(`사용자 ${currentUserId}가 팀 ${currentTeamId}의 프로젝트 ${currentProjectId}에 참여`);
+        });
+
+        // 프로젝트 생성
+        socket.on('project-create', async ({ name }) => {
+    console.log('>>> project-create called', {currentTeamId, name});
+    if (!currentTeamId || !name) {
+        console.warn('currentTeamId or name missing');
+        return;
+    }
+    try {
+        const result = await queryPromise(
+            'INSERT INTO TeamProject (tId, pName, createDate) VALUES (?, ?, CURDATE())',
+            [currentTeamId, name]
+        );
+        console.log('INSERT result:', result);
+        const newProject = { pId: result.insertId, pName: name, createDate: new Date().toISOString().split('T')[0] };
         
-        console.log(`사용자 ${userId}가 팀 ${teamId}에 참여했습니다.`);
+        io.to(currentTeamId).emit('project-added', newProject);
+        console.log('Emitted project-added', newProject);
+        
+      } catch (err) {
+            console.error('프로젝트 생성 실패:', err);
+        }
     });
+
+
+        // 프로젝트 이름 변경
+        socket.on('project-rename', async ({ pId, newName }) => {
+            if (!currentTeamId || !pId || !newName) return;
+            try {
+                await queryPromise(
+                    'UPDATE TeamProject SET pName = ? WHERE pId = ? AND tId = ?',
+                    [newName, pId, currentTeamId]
+                );
+                io.to(currentTeamId).emit('project-renamed', { pId, newName });
+            } catch (err) {
+                console.error('프로젝트 이름 변경 실패:', err);
+            }
+        });
+
+        // 프로젝트 삭제
+        socket.on('project-delete', async ({ pId }) => {
+            if (!currentTeamId || !pId) return;
+            try {
+                await queryPromise('DELETE FROM TeamProject WHERE pId = ? AND tId = ?', [pId, currentTeamId]);
+                io.to(currentTeamId).emit('project-deleted', { pId });
+            } catch (err) {
+                console.error('프로젝트 삭제 실패:', err);
+            }
+        });
+
+
+
+    
+    // 🔹 클라이언트에서 회의록 요약 요청
+      socket.on('summarize-request', async () => {
+      try {
+        if (!currentTeamId || !currentProjectId) {
+          socket.emit('summarize-result', { summary: "선택된 팀 또는 프로젝트가 없습니다." });
+          return;
+        }
+
+          const meetingNotes = [
+          ...textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId).map(t => t.text),
+          ...votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId)
+            .map(v => `투표: ${v.title} (${v.list.map(i => i.content).join(', ')})`),
+          ...images.filter(img => img.tId == currentTeamId && img.pId == currentProjectId)
+            .map(img => `이미지 파일: ${img.fileName || '이미지'}`)
+        ].join('\n');
+
+        if (!meetingNotes.trim()) {
+          socket.emit('summarize-result', { summary: "요약할 회의록이 없습니다." });
+          return;
+        }
+
+        const summary = await summarizeMeeting(meetingNotes);
+        io.to(currentTeamId).emit('summarize-result', { summary });
+      } catch (err) {
+        console.error(err);
+        socket.emit('summarize-result', { summary: "요약 실패" });
+      }
+    });
+
+
 
     // ✅ [수정] WebRTC 시그널링 중계 로직 (안정화)
     const handleSignaling = (eventName) => {
@@ -227,7 +362,7 @@ initializeData().then(() => {
     // ✅ [수정] context를 통해 핸들러 모듈 호출 (안정화)
     const context = {
         getCurrentTeamId: () => currentTeamId,
-        getCurrentProjectId: () => "1", // 임시 pId
+        getCurrentProjectId: () => currentProjectId,
         getCurrentUserId: () => currentUserId,
         textBoxesRef: () => textBoxes,
         setTextBoxes: (newBoxes) => { textBoxes = newBoxes; },

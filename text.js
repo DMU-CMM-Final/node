@@ -62,7 +62,7 @@ module.exports = function(io, socket, context) {
             };
             
 
-            io.to(String(currentTeamId)).emit('addTextBox', responseData);
+            io.to(currentTeamId).emit('addTextBox', responseData);
         }
 
         // 수정
@@ -114,9 +114,9 @@ module.exports = function(io, socket, context) {
                     broadcastTargets.map(user => `userId=${user.userId}, socketId=${user.socketId}`).join(', ')
                 );
                 
-                socket.to(String(currentTeamId)).emit('updateTextBox', responseData);
+                socket.to(currentTeamId).emit('updateTextBox', responseData);
                 console.log('[textHandlers] <송신> 텍스트 수정 브로드캐스트:', {
-                    to: String(currentTeamId), payload: responseData
+                    to: currentTeamId, payload: responseData
                 });
             }
         }
@@ -161,7 +161,7 @@ module.exports = function(io, socket, context) {
                 };
                 
 
-                socket.to(String(currentTeamId)).emit('moveTextBox', responseData);
+                socket.to(currentTeamId).emit('moveTextBox', responseData);
                 }
             }
 
@@ -197,7 +197,7 @@ module.exports = function(io, socket, context) {
                 };
 
                 
-                socket.to(String(currentTeamId)).emit('removeTextBox', responseData);
+                socket.to(currentTeamId).emit('removeTextBox', responseData);
             }
         }
     });

@@ -53,7 +53,7 @@ module.exports = function(io, socket, context) {
 
       votes.push(vote);
       context.setVotes(votes);
-      io.to(String(currentTeamId)).emit('addVote', {
+      io.to(currentTeamId).emit('addVote', {
         type, fnc, node: newNode,
         cLocate: { x, y },
         cScale: { width, height },
@@ -86,7 +86,7 @@ module.exports = function(io, socket, context) {
           console.error('투표 업데이트 실패:', error);
         }
 
-        socket.to(String(currentTeamId)).emit('updateVote', {
+        socket.to(currentTeamId).emit('updateVote', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId,
@@ -127,7 +127,7 @@ module.exports = function(io, socket, context) {
         }, context.queryPromise);
 
 
-        socket.to(String(currentTeamId)).emit('moveVote', {
+        socket.to(currentTeamId).emit('moveVote', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId,
@@ -172,7 +172,7 @@ module.exports = function(io, socket, context) {
 
         
 
-        socket.to(String(currentTeamId)).emit('removeVote', {
+        socket.to(currentTeamId).emit('removeVote', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId
@@ -219,7 +219,7 @@ module.exports = function(io, socket, context) {
         }, context.queryPromise);
 
 
-        io.to(String(currentTeamId)).emit('choiceVote', {
+        io.to(currentTeamId).emit('choiceVote', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId,

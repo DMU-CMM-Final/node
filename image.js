@@ -39,7 +39,7 @@ async function handleImageUpload(req, res, io, images) {
 
     
 
-    io.to(String(tId)).emit('addImage', {
+    io.to(tId).emit('addImage', {
       node, pId, tId, uId, fileName, mimeType, cLocate: { x, y }, cScale: { width, height }
     });
     res.json({ success: true, node, mimeType, cLocate: { x, y }, cScale: { width, height } });
@@ -89,7 +89,7 @@ function imageHandlers(io, socket, context) {
           images[idx].height = cScale.height;
         }
 
-        socket.to(String(currentTeamId)).emit('moveImage', {
+        socket.to(currentTeamId).emit('moveImage', {
           type, fnc, node,
           tId: currentTeamId,
           pId: currentProjectId,
@@ -128,7 +128,7 @@ function imageHandlers(io, socket, context) {
 
         
 
-        io.to(String(currentTeamId)).emit('removeImage', {
+        io.to(currentTeamId).emit('removeImage', {
           type, fnc, node, tId: currentTeamId, pId: currentProjectId
         });
         
