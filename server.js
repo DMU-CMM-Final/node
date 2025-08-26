@@ -128,10 +128,9 @@ async function initializeImages() {
       width: JSON.parse(img.scale).width,
       height: JSON.parse(img.scale).height
     }));
-    console.log('DB에서 불러온 이미지 정보:', imageItems);
 
 
-    // console.log('이미지 초기화 결과:', images);
+
   } catch (error) {
     console.error('이미지 초기화 실패:', error);
   }
@@ -140,8 +139,6 @@ async function initializeImages() {
 
 
 async function initializeData() {
-    // ... 기존 initializeTextBoxes, initializeVotes, initializeImages 함수 내용 ...
-    // 이 함수들을 호출하여 데이터를 메모리에 로드합니다.
     await initializeTextBoxes();
     await initializeVotes();
     await initializeImages();
@@ -149,7 +146,7 @@ async function initializeData() {
 
 initializeData().then(() => {
     io.on('connection', (socket) => {
-        console.log(`User connected: ${socket.id}`);
+
         let currentUserId = null;
         let currentTeamId = null;
         let currentProjectId = null;
@@ -209,21 +206,6 @@ initializeData().then(() => {
               console.error('로그 저장 실패:', error);
             }
 
-            //현재 방 유저 목록 로그 출력
-            console.log(`[JOIN-ROOM] '${userId}' 님이 팀 ${teamId}에 접속`);
-            console.log(`[TEAM ${teamId} 현재 인원]`, currentUsers);
-
-            // 초기 객체 데이터 전송
-            // const filteredTexts = textBoxes.filter(t => t.tId == teamId);
-            // const filteredVotes = votes.filter(v => v.tId == teamId);
-            // const filteredImages = images.filter(img => img.tId == teamId);
-            // socket.emit('init', {
-            //     texts: filteredTexts,
-            //     votes: filteredVotes,
-            //     images: filteredImages,
-            // });
-            
-            console.log(`사용자 ${userId}가 팀 ${teamId}에 참여했습니다.`);
         });
 
         socket.on('join-project', async ({ pId }) => {
@@ -245,31 +227,27 @@ initializeData().then(() => {
             votes: filteredVotes, 
             images: filteredImages 
           });
-          console.log(`사용자 ${currentUserId}가 팀 ${currentTeamId}의 프로젝트 ${currentProjectId}에 참여`);
         });
 
         // 프로젝트 생성
         socket.on('project-create', async ({ name }) => {
-    console.log('>>> project-create called', {currentTeamId, name});
-    if (!currentTeamId || !name) {
-        console.warn('currentTeamId or name missing');
-        return;
-    }
-    try {
-        const result = await queryPromise(
-            'INSERT INTO TeamProject (tId, pName, createDate) VALUES (?, ?, CURDATE())',
-            [currentTeamId, name]
-        );
-        console.log('INSERT result:', result);
-        const newProject = { pId: result.insertId, pName: name, createDate: new Date().toISOString().split('T')[0] };
-        
-        io.to(currentTeamId).emit('project-added', newProject);
-        console.log('Emitted project-added', newProject);
-        
-      } catch (err) {
-            console.error('프로젝트 생성 실패:', err);
+        if (!currentTeamId || !name) {
+            console.warn('currentTeamId or name missing');
+            return;
         }
-    });
+        try {
+            const result = await queryPromise(
+                'INSERT INTO TeamProject (tId, pName, createDate) VALUES (?, ?, CURDATE())',
+                [currentTeamId, name]
+            );
+            const newProject = { pId: result.insertId, pName: name, createDate: new Date().toISOString().split('T')[0] };
+            
+            io.to(currentTeamId).emit('project-added', newProject);
+            
+          } catch (err) {
+                console.error('프로젝트 생성 실패:', err);
+            }
+        });
 
 
         // 프로젝트 이름 변경
@@ -380,7 +358,7 @@ initializeData().then(() => {
 
      // ✅ [수정] 접속 종료 로직
         socket.on('disconnect', () => {
-            console.log(`User disconnected: ${socket.id}`);
+          
             if (currentTeamId && currentUserId) {
                 // 팀에서 사용자 제거
                 if (teams[currentTeamId]) {
@@ -392,7 +370,6 @@ initializeData().then(() => {
 
                 // 다른 사용자들에게 퇴장 알림
                 socket.to(currentTeamId).emit('user-left', { userId: currentUserId });
-                console.log(`User ${currentUserId} left team ${currentTeamId}`);
             }
         });
 

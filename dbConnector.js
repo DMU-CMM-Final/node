@@ -24,6 +24,7 @@
 //최종
 const mysql = require('mysql2/promise');
 
+
 const db = mysql.createPool({
     host: '172.31.87.147',
     user: 'cmm',

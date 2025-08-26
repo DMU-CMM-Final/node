@@ -68,10 +68,6 @@ module.exports = function(io, socket, context) {
         // 수정
         else if (fnc === 'update') {
 
-            console.log('[textHandlers] <수신> 텍스트 수정 요청:', {
-                node, tId: currentTeamId, pId: currentProjectId,
-                cContent, cFont, cColor, cSize, from: currentUserId
-            });
             const idx = textBoxes.findIndex(t => t.node === node && t.tId == currentTeamId && t.pId == currentProjectId);
             if (idx >= 0) {
                 const box = textBoxes[idx];
@@ -110,14 +106,8 @@ module.exports = function(io, socket, context) {
 
                 // 본인 소켓 제외, 타인에게만 브로드캐스트
                 const broadcastTargets = targetUsers.filter(user => user.socketId !== socket.id);
-                console.log(`[textHandlers] 팀 ${currentTeamId}로 브로드캐스트 대상:` +
-                    broadcastTargets.map(user => `userId=${user.userId}, socketId=${user.socketId}`).join(', ')
-                );
-                
+
                 socket.to(currentTeamId).emit('updateTextBox', responseData);
-                console.log('[textHandlers] <송신> 텍스트 수정 브로드캐스트:', {
-                    to: currentTeamId, payload: responseData
-                });
             }
         }
 
