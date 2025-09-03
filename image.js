@@ -11,7 +11,12 @@ const insertLog = require('./logger');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 //메모리 스토리지에 임시 저장을하거 db에 저장하는거임
 async function handleImageUpload(req, res, io, images) {
-  if (!req.file) return res.status(400).send('이미지 없음');
+  // console.log('handleImageUpload 시작');
+
+  if (!req.file) {
+    // console.log('req.file 없음 - 이미지 파일이 전송되지 않음');
+    return res.status(400).send('이미지 없음');
+  }
   const cLocate = req.body.cLocate ? JSON.parse(req.body.cLocate) : {};
   const cScale = req.body.cScale ? JSON.parse(req.body.cScale) : {};
   const { tId, pId, uId } = req.body;
@@ -29,19 +34,22 @@ async function handleImageUpload(req, res, io, images) {
       'INSERT INTO Image (node, pId, tId, uId, fileName, imageData, mimeType) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [node, pId, tId, uId, fileName, imageData, mimeType]
     );
+    // console.log('Image 테이블 INSERT 성공');
     await queryPromise(
       'INSERT INTO ProjectInfo (node, pId, tId, dType, locate, scale) VALUES (?, ?, ?, ?, ?, ?)',
       [node, pId, tId, 'image', JSON.stringify({ x, y }), JSON.stringify({ width, height })]
     );
-    images.push({
-      node, pId, tId, uId, fileName, mimeType, x, y, width, height
-    });
+    // console.log('ProjectInfo 테이블 INSERT 성공');
+    // images.push({
+    //   node, pId, tId, uId, fileName, mimeType, x, y, width, height
+    // });
 
     
 
     io.to(tId).emit('addImage', {
       node, pId, tId, uId, fileName, mimeType, cLocate: { x, y }, cScale: { width, height }
     });
+    // console.log('addImage 이벤트 emit 완료');
     res.json({ success: true, node, mimeType, cLocate: { x, y }, cScale: { width, height } });
     
     await insertLog({

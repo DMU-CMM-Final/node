@@ -6,6 +6,7 @@ const { db, queryPromise } = require('./dbConnector');
 const { upload, handleImageUpload, imageHandlers } = require('./image');
 const textHandlers = require('./text');
 const voteHandlers = require('./vote');
+const calendarHandlers = require('./calendar');
 const cors = require('cors');
 
 const app = express();
@@ -337,23 +338,24 @@ initializeData().then(() => {
     handleSignaling('webrtc-answer');
     handleSignaling('webrtc-candidate');
 
-    // ✅ [수정] context를 통해 핸들러 모듈 호출 (안정화)
     const context = {
-        getCurrentTeamId: () => currentTeamId,
-        getCurrentProjectId: () => currentProjectId,
-        getCurrentUserId: () => currentUserId,
-        textBoxesRef: () => textBoxes,
-        setTextBoxes: (newBoxes) => { textBoxes = newBoxes; },
-        votesRef: () => votes,
-        setVotes: (newVotes) => { votes = newVotes; },
-        imagesRef: () => images,
-        setImages: (newImages) => { images = newImages; },
-        queryPromise,
-        teams
+      getCurrentTeamId: () => currentTeamId,
+      getCurrentProjectId: () => currentProjectId,
+      getCurrentUserId: () => currentUserId,
+      textBoxesRef: () => textBoxes,
+      setTextBoxes: (newBoxes) => { textBoxes = newBoxes; },
+      votesRef: () => votes,
+      setVotes: (newVotes) => { votes = newVotes; },
+      imagesRef: () => images,
+      setImages: (newImages) => { images = newImages; },
+      queryPromise,
+      teams
     };
+    
     textHandlers(io, socket, context);
     voteHandlers(io, socket, context);
     imageHandlers(io, socket, context);
+    calendarHandlers(io, socket, context);
 
 
      // ✅ [수정] 접속 종료 로직
