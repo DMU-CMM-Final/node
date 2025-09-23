@@ -46,7 +46,6 @@ app.get('/node/api/image/:node/:pId/:tId', async (req, res) => {
   }
 });
 // ✅ [수정] 사용자 및 팀 관리를 위한 단일 데이터 구조
-// { teamId: [ { userId, socketId }, ... ] }
 let teams = {};
 
 // DB 데이터 메모리 로드 (기존 로직)
