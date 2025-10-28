@@ -30,7 +30,8 @@ const db = mysql.createPool({
     user: 'cmm',
     password: 'cmm4012!',
     database: 'cmm',
-    port: 3306
+    port: 3306,
+    charset: 'utf8mb4'
 });
 
 async function queryPromise(query, values) {
