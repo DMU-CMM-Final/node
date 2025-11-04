@@ -7,6 +7,7 @@ const { upload, handleImageUpload, imageHandlers } = require('./image');
 const textHandlers = require('./text');
 const voteHandlers = require('./vote');
 const calendarHandlers = require('./calendar');
+const drawingHandlers = require('./drawing');
 const cors = require('cors');
 
 const app = express();
@@ -27,10 +28,10 @@ const { summarizeMeeting } = require('./aiService');
 
 // --- 기존 코드 유지 ---
 const insertLog = require('./logger');
-app.post('/node/api/image/upload', upload.single('image'), (req, res) => {
+app.post('/api/image/upload', upload.single('image'), (req, res) => {
   handleImageUpload(req, res, io, images);
 });
-app.get('/node/api/image/:node/:pId/:tId', async (req, res) => {
+app.get('/api/image/:node/:pId/:tId', async (req, res) => {
   const { node, pId, tId } = req.params;
   try {
     const [image] = await queryPromise(
@@ -39,7 +40,7 @@ app.get('/node/api/image/:node/:pId/:tId', async (req, res) => {
     );
     if (!image) return res.status(404).send('이미지 없음');
     res.set('Content-Type', image.mimeType);
-    res.send(image.imageData);
+    res.end(image.imageData,'binary');
   } catch (err) {
     console.error(err);
     res.status(500).send('서버 오류');
@@ -52,6 +53,11 @@ let teams = {};
 let textBoxes = [];
 let votes = [];
 let images = [];
+let drawings = {};
+
+// 5분 자동 저장 타이머 관리를 위한 객체 및 상수
+let saveTimers = {};
+const SAVE_INTERVAL_MS = 5 * 60 * 1000;
 
 // 데이터 초기화 함수
 async function initializeTextBoxes() {
@@ -135,6 +141,22 @@ async function initializeImages() {
     console.error('이미지 초기화 실패:', error);
   }
 }
+async function initializeDrawings() {
+    try {
+        const canvasItems = await queryPromise(
+            `SELECT pId, canvasData FROM Drawing`
+        );
+        // pId를 키로 하는 맵 형태로 저장
+        drawings = canvasItems.reduce((acc, item) => {
+          // DB에 저장된 JSON 문자열을 객체/배열로 변환하여 메모리에 로드
+          acc[item.pId] = item.canvasData || ''; 
+          return acc;
+        }, {});
+        console.log(`[드로잉 초기화] 프로젝트 ${Object.keys(drawings).length}개 로드 완료`);
+    } catch (error) {
+        console.error('드로잉 캔버스 초기화 실패:', error);
+    }
+}
 
 
 
@@ -142,6 +164,7 @@ async function initializeData() {
     await initializeTextBoxes();
     await initializeVotes();
     await initializeImages();
+    await initializeDrawings();
 }
 
 initializeData().then(() => {
@@ -220,13 +243,25 @@ initializeData().then(() => {
           const filteredTexts = textBoxes.filter(t => t.tId == currentTeamId && t.pId == currentProjectId);
           const filteredVotes = votes.filter(v => v.tId == currentTeamId && v.pId == currentProjectId);
           const filteredImages = images.filter(img => img.tId == currentTeamId && img.pId == currentProjectId);
-
+          const filteredDrawings = drawings[currentProjectId] || '';
+          
           socket.emit('project-init', { 
             pId: currentProjectId, 
             texts: filteredTexts, 
             votes: filteredVotes, 
-            images: filteredImages 
+            images: filteredImages,
+            drawings: filteredDrawings
           });
+          // 🌟 5분 자동 저장 타이머 시작/갱신 🌟
+            if (saveTimers[pId]) {
+                clearInterval(saveTimers[pId]);
+            }
+
+            saveTimers[pId] = setInterval(() => {
+                // 해당 프로젝트 룸에 있는 모든 클라이언트에게 데이터 요청
+                console.log(`[5분 자동 저장 요청] pId: ${pId}`);
+                io.to(currentTeamId).emit('request-drawing-data', { pId, reason: 'auto' });
+            }, SAVE_INTERVAL_MS);
         });
 
         // 프로젝트 생성
@@ -321,7 +356,7 @@ initializeData().then(() => {
                 node: '', // WebRTC 연결 시 고유 노드가 없을 수 있어 빈값 사용
                 tId: payload.teamId,
                 uId: payload.from, // 발신자 ID
-                action: eventName, // 이벤트명 그대로 기록 (ex: 'webrtc-offer')
+                action: eventName,
             }, queryPromise);
         } catch (err) {
             console.error('WebRTC 로그 저장 실패:', err);
@@ -348,24 +383,43 @@ initializeData().then(() => {
       imagesRef: () => images,
       setImages: (newImages) => { images = newImages; },
       queryPromise,
-      teams
+      teams,
+      saveTimers
     };
     
     textHandlers(io, socket, context);
     voteHandlers(io, socket, context);
     imageHandlers(io, socket, context);
     calendarHandlers(io, socket, context);
+    drawingHandlers(io, socket, context);
 
 
      // ✅ [수정] 접속 종료 로직
         socket.on('disconnect', () => {
-          
             if (currentTeamId && currentUserId) {
                 // 팀에서 사용자 제거
                 if (teams[currentTeamId]) {
                     teams[currentTeamId].users = teams[currentTeamId].users.filter(user => user.userId !== currentUserId);
+
+                  // 접속 해제 시 남아있는 클라이언트에게 데이터 요청
+                  // 현재 룸에 남아있는 클라이언트 수 확인
+                  const remainingClients = io.sockets.adapter.rooms.get(currentTeamId)?.size || 0;
+
+                  if (currentProjectId && remainingClients > 0) {
+                      console.log(`[접속 해제 자동 저장 요청] pId: ${currentProjectId} - 남은 사용자 수: ${remainingClients}`);
+                      // 남아있는 클라이언트에게 데이터 요청 (5분 주기와 동일 API)
+                      io.to(currentTeamId).emit('request-drawing-data', { pId: currentProjectId, reason: 'disconnect-trigger' });
+                  }
+                
+                    // 현재 프로젝트에 접속 중인 사용자가 없으면 타이머를 정리
+                    if (currentProjectId && saveTimers[currentProjectId] && remainingClients === 0) {
+                        clearInterval(saveTimers[currentProjectId]);
+                        delete saveTimers[currentProjectId];
+                        console.log(`[타이머 제거] pId: ${currentProjectId} - 팀 룸에 사용자 없음`);
+                    }
+
                     if (teams[currentTeamId].users.length === 0) {
-                        delete teams[currentTeamId];
+                      delete teams[currentTeamId];
                     }
                 }
 
@@ -373,10 +427,8 @@ initializeData().then(() => {
                 socket.to(currentTeamId).emit('user-left', { userId: currentUserId });
             }
         });
-
     });
 });
-
 server.listen(3000, () => {
     console.log('서버가 3000번 포트에서 실행 중입니다.');
 });
